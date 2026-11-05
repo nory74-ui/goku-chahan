@@ -1,0 +1,473 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  background-color: #121214;
+  color: #f5f5f7;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  position: fixed;
+}
+
+/* オーバーレイスクリーン（スタート・リザルト） */
+.overlay-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(10, 10, 15, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.overlay-screen.active {
+  display: flex;
+}
+
+.card {
+  background: linear-gradient(145deg, #1f2026, #16171c);
+  border: 1px solid #3d3e4a;
+  border-radius: 20px;
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.title-badge {
+  display: inline-block;
+  background: #d93829;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.game-title {
+  font-size: 32px;
+  font-weight: 900;
+  color: #ffca28;
+  text-shadow: 0 2px 10px rgba(255, 202, 40, 0.4);
+  margin-bottom: 6px;
+  letter-spacing: 2px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 20px;
+}
+
+.instructions {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: left;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.instructions h3 {
+  font-size: 13px;
+  color: #ff9800;
+  margin-bottom: 6px;
+}
+
+.instructions ul {
+  padding-left: 18px;
+}
+
+.instructions li {
+  margin-bottom: 4px;
+}
+
+.btn-main {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111;
+  background: linear-gradient(180deg, #ffca28, #f57c00);
+  border: none;
+  border-radius: 30px;
+  box-shadow: 0 4px 15px rgba(245, 124, 0, 0.5);
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.1s;
+}
+
+.btn-main:active {
+  transform: scale(0.97);
+  filter: brightness(0.9);
+}
+
+.status-text {
+  font-size: 11px;
+  color: #888;
+  margin-top: 10px;
+}
+
+/* ゲームコンテナ */
+#game-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: #141418;
+}
+
+/* 上部ステータスバー */
+#status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px 6px;
+  background: #1a1b22;
+  border-bottom: 1px solid #2d2e38;
+  height: 54px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-item .label {
+  font-size: 10px;
+  color: #888;
+  font-weight: 700;
+}
+
+.status-item .value {
+  font-size: 20px;
+  font-weight: 900;
+  color: #ffca28;
+}
+
+.status-item.center {
+  align-items: center;
+}
+
+.combo-text {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ff9800;
+  text-shadow: 0 0 8px rgba(255, 152, 0, 0.6);
+}
+
+.feedback-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e676;
+  letter-spacing: 1px;
+}
+
+/* メーターバー */
+#meters-container {
+  display: flex;
+  gap: 12px;
+  padding: 6px 16px;
+  background: #181920;
+}
+
+.meter-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meter-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #aaa;
+}
+
+.meter-bar-bg {
+  height: 8px;
+  background: #282934;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.meter-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  transition: width 0.15s ease-out, background-color 0.2s;
+}
+
+.meter-bar-fill.dry {
+  background: linear-gradient(90deg, #42a5f5, #ffca28);
+}
+
+.meter-bar-fill.heat {
+  background: linear-gradient(90deg, #ffca28, #f44336);
+}
+
+/* 中華鍋ビュー */
+#wok-view {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(circle at center, #262730 0%, #15161c 65%, #090a0d 100%);
+}
+
+#wok-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 鍋肌ハイライト（醤油ゾーン） */
+.wok-rim {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  border-radius: 50%;
+  border: 3px dashed transparent;
+  pointer-events: none;
+  transition: border-color 0.3s;
+}
+
+.wok-rim.active {
+  border-color: rgba(255, 87, 34, 0.8);
+  box-shadow: inset 0 0 20px rgba(255, 87, 34, 0.4), 0 0 20px rgba(255, 87, 34, 0.4);
+  animation: pulse-rim 0.8s infinite alternate;
+}
+
+@keyframes pulse-rim {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+/* 鑊気（ウォックヘイ）発動バナー */
+.wok-hei-effect {
+  position: absolute;
+  top: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 69, 0, 0.8), transparent);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+  width: 100%;
+  text-align: center;
+  padding: 8px 0;
+  text-shadow: 0 0 10px #ffeb3b;
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28), opacity 0.3s;
+}
+
+.wok-hei-effect.show {
+  transform: scale(1.1);
+  opacity: 1;
+}
+
+/* 下部アクションパレット */
+#action-palette {
+  background: #1a1b24;
+  padding: 10px 12px 18px;
+  border-top: 1px solid #2d2e38;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.palette-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.palette-row.second {
+  grid-template-columns: 1fr 1fr;
+}
+
+.ingredient-btn, .action-btn {
+  background: #2a2b38;
+  border: 1px solid #3d3f52;
+  border-radius: 12px;
+  padding: 10px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #eee;
+  cursor: pointer;
+  transition: transform 0.08s, background-color 0.15s, border-color 0.15s;
+}
+
+.ingredient-btn .icon, .action-btn .icon {
+  font-size: 22px;
+}
+
+.ingredient-btn .name, .action-btn .name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ingredient-btn:active:not(:disabled), .action-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  background: #393a4c;
+}
+
+.ingredient-btn:disabled, .action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: grayscale(0.8);
+}
+
+.soy-btn {
+  background: linear-gradient(145deg, #38241b, #211510);
+  border-color: #793717;
+}
+
+.soy-btn:not(:disabled) {
+  border-color: #ff5722;
+  box-shadow: 0 0 10px rgba(255, 87, 34, 0.3);
+}
+
+.ladle-btn {
+  background: linear-gradient(145deg, #2b3542, #182029);
+  border-color: #455a64;
+}
+
+.ladle-btn:not(:disabled) {
+  border-color: #42a5f5;
+  box-shadow: 0 0 10px rgba(66, 165, 245, 0.3);
+}
+
+/* デバッグパネル */
+#debug-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: #09090b;
+  font-size: 10px;
+  color: #777;
+  padding: 4px 8px;
+  border-top: 1px solid #1a1a20;
+}
+
+#debug-panel button {
+  background: #333;
+  color: #ccc;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+/* リザルトカード */
+.result-card {
+  max-width: 420px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rank-badge {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #111;
+  font-size: 32px;
+  font-weight: 900;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
+}
+
+.result-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffca28;
+}
+
+.plate-preview {
+  margin: 10px auto;
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-display {
+  margin-bottom: 12px;
+}
+
+.total-score-label {
+  font-size: 11px;
+  color: #888;
+}
+
+.total-score-val {
+  font-size: 32px;
+  font-weight: 900;
+  color: #ffb300;
+}
+
+.breakdown-list {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  text-align: left;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 3px;
+}
+
+.breakdown-item b {
+  color: #ffca28;
+}
+
+.chef-comment {
+  font-size: 12px;
+  color: #ccc;
+  font-style: italic;
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
