@@ -1,13 +1,15 @@
 /**
- * 極・炒飯道 3D (Goku Chahandou 3D)
- * Three.js (3D Graphics) × Rapier.js (WASM Physics) × Web Audio API (Dynamic Sound)
+ * 極・炒飯道 PHOTOREAL EDITION (Goku Chahandou - Real-Time Photographic Wok Physics Engine)
+ *
+ * 【アーキテクチャ刷新】
+ * - 外部CDN/WASMのロード競合・遅延を完全排除し、開いた瞬間に100%確実に起動
+ * - 実写マクロ撮影テクスチャ（空の打ち出し中華鍋、強火ガスコンロ、白米・黄金炒飯、半熟炒り卵、焼豚、長ネギ）
+ *   から高精細スプライト＆レイヤーをリアルタイム合成
+ * - スマホの加速度(DeviceMotion)・傾き(DeviceOrientation)・タッチドラッグが1:1で中華鍋の3D変位と
+ *   放物面ボウル内の約800個の具材粒子に直結する「スマホ＝中華鍋」完全シンクロ物理エンジン
  */
 
-import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import RAPIER from '@dimforge/rapier3d-compat';
-
-// --- 1. Web Audio API 音響エンジン ---
+// --- 1. プロシージャル実写音響エンジン (Web Audio API) ---
 class ChahanAudioEngine {
   constructor() {
     this.ctx = null;
@@ -17,25 +19,29 @@ class ChahanAudioEngine {
   }
 
   init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AudioCtx();
-      this.setupSizzleLoop();
-    }
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    try {
+      if (!this.ctx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        this.ctx = new AudioCtx();
+        this.setupSizzleLoop();
+      }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume();
+      }
+    } catch (e) {
+      console.warn('Audio init warning:', e);
     }
   }
 
-  // 常時流れる炒めノイズ（ホワイトノイズ＋クラックル）
   setupSizzleLoop() {
     const bufferSize = this.ctx.sampleRate * 2.0;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
       const white = Math.random() * 2 - 1;
-      const crackle = Math.random() < 0.005 ? (Math.random() * 2 - 1) * 2.5 : 0;
-      data[i] = white * 0.35 + crackle * 0.65;
+      const crackle = Math.random() < 0.008 ? (Math.random() * 2 - 1) * 2.8 : 0;
+      data[i] = white * 0.32 + crackle * 0.68;
     }
 
     const noiseSource = this.ctx.createBufferSource();
@@ -44,8 +50,8 @@ class ChahanAudioEngine {
 
     this.sizzleFilter = this.ctx.createBiquadFilter();
     this.sizzleFilter.type = 'bandpass';
-    this.sizzleFilter.frequency.value = 1600;
-    this.sizzleFilter.Q.value = 1.2;
+    this.sizzleFilter.frequency.value = 1700;
+    this.sizzleFilter.Q.value = 1.1;
 
     this.sizzleGain = this.ctx.createGain();
     this.sizzleGain.gain.value = 0.0;
@@ -56,59 +62,79 @@ class ChahanAudioEngine {
     noiseSource.start();
   }
 
-  // 鍋底の米粒接触数と熱量に応じたシズル音の動的変化
-  updateSizzle(heat, touchingGrains) {
-    if (!this.sizzleGain || !this.isCooking) return;
-    const intensity = Math.min(1.0, touchingGrains / 60);
-    const targetVol = (heat / 100) * 0.55 * intensity;
-    this.sizzleGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.08);
+  updateSizzle(heat, ingredientCount, agitationSpeed = 0) {
+    if (!this.sizzleGain || !this.ctx || !this.isCooking) return;
+    const baseIntensity = Math.min(1.0, (ingredientCount + 12) / 180);
+    const motionBoost = Math.min(0.45, agitationSpeed * 0.08);
+    const targetVol = Math.min(0.65, (heat / 100) * 0.48 * baseIntensity + motionBoost);
+    this.sizzleGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.06);
 
-    // 熱量が高いほど高周波のパチパチ音にシフト
-    const targetFreq = 1200 + (heat / 100) * 1800;
-    this.sizzleFilter.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.1);
+    const targetFreq = 1300 + (heat / 100) * 1600 + Math.min(800, agitationSpeed * 120);
+    this.sizzleFilter.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.08);
   }
 
-  // 米粒が鍋肌に当たった時の「ジャッ！」「チリッ！」衝突音（音割れ防止サンプリング）
   playCollision(impactSpeed) {
-    if (!this.ctx || impactSpeed < 0.8) return;
+    if (!this.ctx || impactSpeed < 0.6) return;
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(280 + Math.random() * 200, now);
-    osc.frequency.exponentialRampToValueAtTime(100, now + 0.06);
+    osc.frequency.setValueAtTime(310 + Math.random() * 240, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.055);
 
-    const vol = Math.min(0.25, (impactSpeed / 6.0) * 0.25);
+    const vol = Math.min(0.22, (impactSpeed / 5.0) * 0.22);
     gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.06);
+    osc.stop(now + 0.055);
   }
 
-  // 煽り音（金属の「シャン！」＋風切り音）
   playToss(power) {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
+    // 鉄鍋と五徳が擦れる金属音「シャン！ガッ！」
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(360, now);
-    osc.frequency.exponentialRampToValueAtTime(130, now + 0.22);
+    osc.frequency.setValueAtTime(380 * Math.min(1.3, Math.max(0.8, power)), now);
+    osc.frequency.exponentialRampToValueAtTime(125, now + 0.20);
 
-    gain.gain.setValueAtTime(0.35 * power, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+    gain.gain.setValueAtTime(Math.min(0.42, 0.26 * power), now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start(now);
     osc.stop(now + 0.22);
+
+    // 米粒の波が宙を舞う風切り＆着地シズル音「ジャッ！」
+    const bufSize = Math.floor(this.ctx.sampleRate * 0.24);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.sin((i / bufSize) * Math.PI);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1150;
+
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(Math.min(0.48, 0.30 * power), now);
+    nGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(now);
   }
 
-  // 具材投入音
   playAdd() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
@@ -116,83 +142,79 @@ class ChahanAudioEngine {
     const gain = this.ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(520, now);
-    osc.frequency.exponentialRampToValueAtTime(1040, now + 0.12);
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+    osc.frequency.exponentialRampToValueAtTime(860, now + 0.12);
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start(now);
     osc.stop(now + 0.12);
   }
 
-  // 鍋肌醤油の激しい気化音（ジュワァァッ！）
   playSoySizzle() {
     if (!this.ctx) return;
-    const duration = 0.9;
     const now = this.ctx.currentTime;
-
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * 0.9;
+    const bufSize = Math.floor(this.ctx.sampleRate * 0.9);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 0.55);
     }
-
-    const source = this.ctx.createBufferSource();
-    source.buffer = buffer;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
 
     const filter = this.ctx.createBiquadFilter();
-    filter.type = 'highpass';
-    filter.frequency.setValueAtTime(1200, now);
-    filter.frequency.exponentialRampToValueAtTime(400, now + duration);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2500, now);
+    filter.frequency.exponentialRampToValueAtTime(900, now + 0.9);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.7, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+    gain.gain.setValueAtTime(0.65, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
 
-    source.connect(filter);
+    noise.connect(filter);
     filter.connect(gain);
     gain.connect(this.ctx.destination);
-    source.start(now);
+    noise.start(now);
   }
 
-  // 皿盛りパカッ！音
   playPlating() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.exponentialRampToValueAtTime(70, now + 0.3);
-    gain.gain.setValueAtTime(0.65, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.3);
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+      gain.gain.setValueAtTime(0.25, now + idx * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now + idx * 0.08);
+      osc.stop(now + idx * 0.08 + 0.45);
+    });
   }
 }
 
-// --- 2. メイン3Dシミュレーション クラス ---
-class GokuChahan3D {
+// --- 2. フォトリアル中華鍋＆物理シミュレーションエンジン ---
+class GokuChahanPhotoreal {
   constructor() {
     this.canvas = document.getElementById('three-canvas');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.audio = new ChahanAudioEngine();
 
-    this.gameState = 'START'; // START, COOKING, LADLED, RESULT
+    // ゲーム進行状態
+    this.gameState = 'COOKING';
     this.timeRemaining = 45.0;
     this.score = 0;
     this.combo = 0;
     this.maxCombo = 0;
-
-    // 熱力学パラメーター
-    this.dryness = 0;    // 0〜100 (パラパラ度)
-    this.heat = 30;      // 0〜100 (鍋底熱量)
-    this.burnAmount = 0; // 焦げ蓄積
     this.lastTossTime = 0;
 
-    // 具材フラグ
+    // 調理パラメータ
+    this.dryness = 0;      // パラパラ度 (0〜100%)
+    this.heat = 38;        // 鍋底熱量 (0〜100%)
+    this.burnAmount = 0;   // 焦げ蓄積
     this.ingredients = {
       egg: false,
       rice: false,
@@ -205,51 +227,54 @@ class GokuChahan3D {
     this.wokHeiActive = false;
     this.wokHeiTossCount = 0;
 
-    // Three.js & Rapier コア
-    this.scene = null;
-    this.camera = null;
-    this.renderer = null;
-    this.world = null;
+    // 中華鍋の3D運動状態（スマホの揺れ・傾き・ドラッグと1:1で連動）
+    this.wokX = 0;          // 左右変位 (-1.0 〜 +1.0)
+    this.wokY = 0;          // 前後（手前・奥）変位 (-1.0 〜 +1.0)
+    this.wokZ = 0;          // 上下（持ち上げ・煽り）高さ (0.0 〜 1.0)
+    this.wokVx = 0;
+    this.wokVy = 0;
+    this.wokVz = 0;
+    this.tiltX = 0;         // スマホの左右傾き (-0.5 〜 +0.5)
+    this.tiltY = 0;         // スマホの前後傾き (-0.5 〜 +0.5)
 
-    // 剛体・メッシュ
-    this.wokMesh = null;
-    this.wokRigidBody = null;
-    this.wokRadius = 1.6;
-    this.wokDepth = 0.85;
+    // 具材パーティクル配列（最初は完全に空！）
+    this.eggPool = null;    // 投入直後のジュワッと広がる液状〜半熟卵プール
+    this.eggParticles = []; // ほぐれたふんわり半熟炒り卵そぼろ (56個)
+    this.riceParticles = []; // 実写テクスチャ米粒 (650粒)
+    this.meatParticles = []; // 実写角切りチャーシュー (28個)
+    this.onionParticles = []; // 実写小口切り長ネギ (38個)
+    this.oilSparks = [];    // パチパチ弾ける油の微細気泡
+    this.soyBubbles = [];   // 鍋肌醤油のキャラメル沸騰泡
+    this.steamParticles = []; // 立ち上る湯気・鑊気（ウォックヘイ）の白煙
 
-    // 米粒（InstancedMesh + RigidBodies）
-    this.riceCount = 240;
-    this.riceInstancedMesh = null;
-    this.riceBodies = [];
-    this.riceBurnTimers = new Float32Array(this.riceCount);
+    // 実写テクスチャ画像とベイク済み高精細スプライトキャッシュ
+    this.textures = {};
+    this.sprites = {
+      riceWhite: [],
+      riceEgg: [],
+      riceGolden: [],
+      riceToasted: [],
+      eggCurds: [],
+      meatCubes: [],
+      onionRings: [],
+      wokCutout: null
+    };
 
-    // 炒り卵（ふんわり半熟そぼろ塊）
-    this.eggCount = 48;
-    this.eggInstancedMesh = null;
-    this.eggBodies = [];
-    this.eggSpawned = false;
-
-    // 具材メッシュ・剛体
-    this.meatCount = 24;
-    this.meatInstancedMesh = null;
-    this.meatBodies = [];
-    this.meatSpawned = false;
-
-    this.onionCount = 28;
-    this.onionInstancedMesh = null;
-    this.onionBodies = [];
-    this.onionSpawned = false;
-
-    // 湯気・煙パーティクル
-    this.smokeSystem = null;
-    this.smokeParticles = [];
-
-    // センサー＆キー入力
-    this.lastAccelY = 0;
-    this.lastAccelZ = 0;
+    // センサー＆ポインター追跡
     this.lastTossDetectTime = 0;
-    this.wokTiltX = 0;
-    this.wokTiltZ = 0;
+    this.isPointerDown = false;
+    this.lastPointerX = 0;
+    this.lastPointerY = 0;
+    this.lastPointerTime = 0;
+    this.sensorActive = false;
+
+    // レイアウト座標
+    this.viewW = window.innerWidth;
+    this.viewH = window.innerHeight;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.wokCenterX = 0;
+    this.wokCenterY = 0;
+    this.wokRadiusPx = 150;
 
     // FPS計測
     this.lastFrameTime = performance.now();
@@ -259,438 +284,411 @@ class GokuChahan3D {
     this.init();
   }
 
-  async init() {
-    // 1. Rapier WASM 初期化
-    await RAPIER.init();
-    this.world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
-
-    // 2. Three.js シーン・カメラ・レンダラー初期化
-    this.setupThreeScene();
-
-    // 3. 中華鍋（放物面メッシュ ＋ Trimeshコライダー）構築
-    this.buildWok();
-
-    // 4. 米粒＆具材（InstancedMesh ＋ 剛体）初期化
-    this.buildRiceAndIngredients();
-
-    // 5. 湯気・煙パーティクル構築
-    this.buildSmokeSystem();
-
-    // 6. 入力イベント＆センサー設定
+  init() {
+    this.handleResize();
+    this.buildInitialSteam();
+    this.loadPhotorealTextures();
     this.bindEvents();
-
-    // 7. レンダリングループ開始
-    this.animate();
-
-    // 8. 開いた瞬間から超リアル中華鍋＆チャーハン炒めを開始
+    this.resetGame();
     this.startGame();
+    requestAnimationFrame((t) => this.animate(t));
   }
 
-  setupThreeScene() {
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a0b0e);
+  // --- 実写テクスチャ読み込み ＆ フォトリアル切り抜きスプライト生成 ---
+  loadPhotorealTextures() {
+    const sources = {
+      wokEmpty: 'textures/wok_empty_fpv.jpg',
+      wokSurface: 'textures/wok_diffuse.jpg',
+      rice: 'textures/rice_diffuse.jpg',
+      egg: 'textures/egg_diffuse.jpg',
+      meat: 'textures/meat_diffuse.jpg',
+      onion: 'textures/onion_diffuse.jpg'
+    };
 
-    const aspect = window.innerWidth / window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 50);
-    this.setupCameraForAspect();
+    // テクスチャロード完了前でも即座に描画できるようプロシージャル高精細スプライトを先行生成
+    this.bakePhotorealSprites();
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      antialias: true,
-      powerPreference: 'high-performance'
+    Object.entries(sources).forEach(([key, url]) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        this.textures[key] = img;
+        if (key === 'wokEmpty') {
+          this.bakeWokCutout(img);
+        } else {
+          this.bakePhotorealSprites();
+        }
+      };
+      img.src = url;
     });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-    // RoomEnvironment による映画級スタジオ・厨房環境反射の生成（鉄鍋の油膜や具材のツヤが格段にリアル化）
-    try {
-      const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-      pmremGenerator.compileEquirectangularShader();
-      const envTexture = pmremGenerator.fromScene(new RoomEnvironment(this.renderer), 0.04).texture;
-      this.scene.environment = envTexture;
-    } catch (e) {
-      console.warn('RoomEnvironment init failed:', e);
-    }
-
-    // ライティング (厨房の映画調ライティング: 米粒と鉄鍋の油膜が黒く潰れず美しく輝く)
-    const ambientLight = new THREE.AmbientLight(0xfff7ed, 0.9);
-    this.scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2.6);
-    dirLight.position.set(1.8, 6.8, 2.6);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.bias = -0.0005;
-    this.scene.add(dirLight);
-
-    // 補助フィルライト (真上から全体を照らし影の黒潰れを防止)
-    const fillLight = new THREE.DirectionalLight(0xe8f0ff, 1.1);
-    fillLight.position.set(-2.5, 5.0, -1.5);
-    this.scene.add(fillLight);
-
-    // 鍋底のコンロ熱（オレンジの赤熱グロー ＋ 青いガス炎）
-    this.stoveLight = new THREE.PointLight(0xff5722, 1.8, 4.0);
-    this.stoveLight.position.set(0, 0.05, 0);
-    this.scene.add(this.stoveLight);
-
-    const blueFlameLight = new THREE.PointLight(0x00b0ff, 2.0, 3.2);
-    blueFlameLight.position.set(0, -0.2, 0);
-    this.scene.add(blueFlameLight);
   }
 
-  // スマホ・タブレット縦画面およびPC横画面で、中華鍋全体が美しく収まり下部ボタンと一切重ならないカメラ調整
-  setupCameraForAspect() {
-    if (!this.camera) return;
-    const aspect = window.innerWidth / window.innerHeight;
-    this.camera.aspect = aspect;
+  // 空の打ち出し中華鍋＋木柄（wok_empty_fpv.jpg: 1024x1024）から
+  // 1) 固定される「業務用ガスコンロ＆強火バーナー背景 (stoveBg)」と
+  // 2) スマホの動きで1:1に動く「打ち出し中華鍋＋木柄 (wokCutout)」の2レイヤーを分離生成
+  bakeWokCutout(img) {
+    const size = 1024;
 
-    if (aspect < 1.0) {
-      // スマホ・タブレット縦画面 (9:16 〜 3:4)
-      // 横幅に合わせてFOVを拡張し、注視点を奥にシフトして下部ボタンエリアと中華鍋を完全分離
-      const targetFov = 50 / aspect * 0.54;
-      this.camera.fov = Math.min(68, Math.max(48, targetFov));
-      this.camera.position.set(0, 5.0, 2.1);
-      this.camera.lookAt(0, 0.2, 0.50);
-    } else {
-      // PC・横画面 (16:9, 16:10, 4:3)
-      // 中華鍋全体（手前ハンドル含む）を画面上部〜中央に配置し、下部操作ボタンと絶対に重ならないアングル
-      this.camera.fov = 40;
-      this.camera.position.set(0, 5.2, 2.9);
-      this.camera.lookAt(0, 0.2, 0.85);
+    // --- A. 可動中華鍋＋木柄レイヤー (wokCutout) ---
+    const off = document.createElement('canvas');
+    off.width = size;
+    off.height = size;
+    const c = off.getContext('2d');
+
+    c.save();
+    c.beginPath();
+    c.arc(511, 458, 373, 0, Math.PI * 2);
+    c.rect(456, 800, 96, 224);
+    c.clip();
+    c.drawImage(img, 0, 0, size, size);
+    c.restore();
+
+    // 鍋の金属リムの立体ハイライト
+    c.strokeStyle = 'rgba(255, 250, 240, 0.32)';
+    c.lineWidth = 3.5;
+    c.beginPath();
+    c.arc(511, 458, 371, 0, Math.PI * 2);
+    c.stroke();
+
+    this.sprites.wokCutout = off;
+
+    // --- B. 固定コンロ＆バーナー火口背景レイヤー (stoveBg) ---
+    // 鍋が大きく動いても下に元の鍋の縁が二重に見えないよう、鍋の下に火口と五徳を描画
+    const bg = document.createElement('canvas');
+    bg.width = size;
+    bg.height = size;
+    const bc = bg.getContext('2d');
+
+    bc.drawImage(img, 0, 0, size, size);
+
+    // 下部ステンレス天板の柄の影部分をクリーンなステンレス質感で補完
+    const steelGrad = bc.createLinearGradient(420, 845, 590, 845);
+    steelGrad.addColorStop(0, '#9a9d9e');
+    steelGrad.addColorStop(0.5, '#b8babc');
+    steelGrad.addColorStop(1, '#8c8f91');
+    bc.fillStyle = steelGrad;
+    bc.fillRect(445, 845, 118, 179);
+
+    // 鍋の下に隠れている強火バーナー火口と五徳の放射フレーム
+    const pitGrad = bc.createRadialGradient(511, 458, 40, 511, 458, 382);
+    pitGrad.addColorStop(0, '#090b10');
+    pitGrad.addColorStop(0.55, '#101520');
+    pitGrad.addColorStop(0.82, '#1b3b68');
+    pitGrad.addColorStop(0.93, '#e86f2c');
+    pitGrad.addColorStop(1, 'rgba(20, 22, 28, 0)');
+    bc.fillStyle = pitGrad;
+    bc.beginPath();
+    bc.arc(511, 458, 382, 0, Math.PI * 2);
+    bc.fill();
+
+    // 五徳の鋳鉄クロスバー
+    bc.strokeStyle = '#18191c';
+    bc.lineWidth = 22;
+    for (let a = 0; a < 4; a++) {
+      const ang = (a * Math.PI) / 4;
+      bc.beginPath();
+      bc.moveTo(511 - Math.cos(ang) * 380, 458 - Math.sin(ang) * 380);
+      bc.lineTo(511 + Math.cos(ang) * 380, 458 + Math.sin(ang) * 380);
+      bc.stroke();
     }
-    this.camera.updateProjectionMatrix();
+
+    this.sprites.stoveBg = bg;
   }
 
-  // --- 中華鍋の放物面メッシュ ＆ Trimesh コライダー構築 ---
-  buildWok() {
-    const R = this.wokRadius;
-    const H = this.wokDepth;
-    const radialSegs = 36;
-    const heightSegs = 20;
+  // 実写マクロ写真から米粒・半熟炒り卵・焼豚・長ネギのリアル切り抜きスプライトをベイク
+  bakePhotorealSprites() {
+    this.sprites.riceWhite = [];
+    this.sprites.riceEgg = [];
+    this.sprites.riceGolden = [];
+    this.sprites.riceToasted = [];
+    this.sprites.eggCurds = [];
+    this.sprites.meatCubes = [];
+    this.sprites.onionRings = [];
 
-    const vertices = [];
-    const indices = [];
-    const uvs = [];
+    // 1. 米粒スプライト（4段階の調理状態 × 6バリエーション）
+    const states = [
+      { key: 'riceWhite', base: '#fcfaf2',mid: '#f2ede0', edge: '#d8cfb8', glow: 'rgba(255,255,255,0.92)', tint: null },
+      { key: 'riceEgg', base: '#fff3b8', mid: '#f7dc78', edge: '#d9b23b', glow: 'rgba(255,255,240,0.95)', tint: 'rgba(255, 225, 95, 0.36)' },
+      { key: 'riceGolden', base: '#ffec9e', mid: '#f2c755', edge: '#c98a22', glow: 'rgba(255,252,230,0.95)', tint: 'rgba(245, 180, 45, 0.42)' },
+      { key: 'riceToasted', base: '#d99b52', mid: '#b56e28', edge: '#753d10', glow: 'rgba(255,220,170,0.8)', tint: 'rgba(145, 70, 18, 0.55)' }
+    ];
 
-    // 放物面幾何学：y = (H / R^2) * r^2
-    const curvature = H / (R * R);
+    states.forEach((st) => {
+      for (let v = 0; v < 6; v++) {
+        const w = 28, h = 18;
+        const cv = document.createElement('canvas');
+        cv.width = w;
+        cv.height = h;
+        const c = cv.getContext('2d');
 
-    for (let h = 0; h <= heightSegs; h++) {
-      const rNorm = h / heightSegs;
-      const r = rNorm * R;
-      const y = curvature * (r * r);
+        c.save();
+        c.translate(w / 2, h / 2);
+        // 日本米（ジャポニカ米）のふっくらした楕円粒形状
+        c.beginPath();
+        c.ellipse(0, 0, 10.5, 5.8, 0, 0, Math.PI * 2);
+        c.closePath();
+        c.clip();
 
-      for (let s = 0; s <= radialSegs; s++) {
-        const theta = (s / radialSegs) * Math.PI * 2;
-        const x = Math.cos(theta) * r;
-        const z = Math.sin(theta) * r;
+        if (this.textures.rice) {
+          // 実写米テクスチャからランダムな領域をサンプリングして自然な陰影・焦げ目を付与
+          const sx = (v * 137) % Math.max(1, this.textures.rice.width - 64);
+          const sy = (v * 211) % Math.max(1, this.textures.rice.height - 64);
+          c.drawImage(this.textures.rice, sx, sy, 48, 32, -12, -8, 24, 16);
+          // 明るさと透明感のある米肌ブレンド
+          const grad = c.createRadialGradient(-2, -1.5, 1, 0, 0, 11);
+          grad.addColorStop(0, st.base);
+          grad.addColorStop(0.65, st.mid);
+          grad.addColorStop(1, st.edge);
+          c.globalAlpha = st.key === 'riceWhite' ? 0.78 : 0.62;
+          c.fillStyle = grad;
+          c.fillRect(-12, -8, 24, 16);
+          c.globalAlpha = 1.0;
+          if (st.tint) {
+            c.fillStyle = st.tint;
+            c.fillRect(-12, -8, 24, 16);
+          }
+        } else {
+          const grad = c.createRadialGradient(-2.5, -1.5, 1, 0, 0, 11);
+          grad.addColorStop(0, st.base);
+          grad.addColorStop(0.68, st.mid);
+          grad.addColorStop(1, st.edge);
+          c.fillStyle = grad;
+          c.fill();
+        }
 
-        vertices.push(x, y, z);
-        uvs.push(s / radialSegs, h / heightSegs);
+        // 油膜のツヤ・スペキュラハイライト（一粒一粒が油をまとって輝く）
+        c.fillStyle = st.glow;
+        c.beginPath();
+        c.ellipse(-3.2, -1.8, 4.2, 1.4, -0.15, 0, Math.PI * 2);
+        c.fill();
+
+        c.restore();
+        this.sprites[st.key].push(cv);
       }
-    }
+    });
 
-    for (let h = 0; h < heightSegs; h++) {
-      for (let s = 0; s < radialSegs; s++) {
-        const first = h * (radialSegs + 1) + s;
-        const second = first + radialSegs + 1;
+    // 2. ふんわり半熟炒り卵そぼろスプライト（10バリエーション：実写egg_diffuse.jpg切り抜き）
+    for (let v = 0; v < 10; v++) {
+      const sz = 64;
+      const cv = document.createElement('canvas');
+      cv.width = sz;
+      cv.height = sz;
+      const c = cv.getContext('2d');
 
-        // 内側が見えるインデックス順
-        indices.push(first, first + 1, second);
-        indices.push(second, first + 1, second + 1);
+      c.save();
+      c.translate(sz / 2, sz / 2);
+      // 不規則でふんわりした雲形の卵そぼろ輪郭
+      c.beginPath();
+      const lobes = 7;
+      for (let i = 0; i <= lobes * 4; i++) {
+        const ang = (i / (lobes * 4)) * Math.PI * 2;
+        const r = 18 + Math.sin(ang * 3 + v * 1.7) * 4.5 + Math.cos(ang * 5 - v) * 3.0;
+        const px = Math.cos(ang) * r;
+        const py = Math.sin(ang) * (r * 0.82);
+        if (i === 0) c.moveTo(px, py);
+        else c.lineTo(px, py);
       }
+      c.closePath();
+      c.clip();
+
+      if (this.textures.egg) {
+        const sx = (v * 97) % Math.max(1, this.textures.egg.width - 160);
+        const sy = (v * 149) % Math.max(1, this.textures.egg.height - 160);
+        c.drawImage(this.textures.egg, sx, sy, 150, 150, -28, -28, 56, 56);
+      } else {
+        const g = c.createRadialGradient(-5, -5, 2, 0, 0, 26);
+        g.addColorStop(0, '#fff9c4');
+        g.addColorStop(0.5, '#ffd54f');
+        g.addColorStop(1, '#e69b10');
+        c.fillStyle = g;
+        c.fillRect(-28, -28, 56, 56);
+      }
+
+      // 半熟の立体感と白身のレース感ハイライト
+      const sheen = c.createRadialGradient(-6, -6, 2, 0, 0, 25);
+      sheen.addColorStop(0, 'rgba(255, 253, 230, 0.45)');
+      sheen.addColorStop(0.6, 'rgba(255, 213, 79, 0.12)');
+      sheen.addColorStop(1, 'rgba(180, 105, 10, 0.35)');
+      c.fillStyle = sheen;
+      c.fillRect(-28, -28, 56, 56);
+
+      c.restore();
+      this.sprites.eggCurds.push(cv);
     }
 
-    const wokGeom = new THREE.BufferGeometry();
-    wokGeom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    wokGeom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    wokGeom.setIndex(indices);
-    wokGeom.computeVertexNormals();
+    // 3. 角切りチャーシュー（焼豚）スプライト（8バリエーション：実写meat_diffuse.jpg切り抜き）
+    for (let v = 0; v < 8; v++) {
+      const sz = 52;
+      const cv = document.createElement('canvas');
+      cv.width = sz;
+      cv.height = sz;
+      const c = cv.getContext('2d');
 
-    const texLoader = new THREE.TextureLoader();
-    const wokTex = texLoader.load('textures/wok_diffuse.jpg');
-    wokTex.colorSpace = THREE.SRGBColorSpace;
-    wokTex.wrapS = THREE.RepeatWrapping;
-    wokTex.wrapT = THREE.RepeatWrapping;
-    wokTex.repeat.set(2, 2);
+      c.save();
+      c.translate(sz / 2, sz / 2);
+      c.beginPath();
+      c.rect(-16, -15, 32, 30);
+      c.closePath();
+      c.clip();
 
-    const wokNormal = texLoader.load('textures/wok_hammer_normal.png');
-    wokNormal.wrapS = THREE.RepeatWrapping;
-    wokNormal.wrapT = THREE.RepeatWrapping;
-    wokNormal.repeat.set(4, 4);
+      if (this.textures.meat) {
+        const sx = (v * 123) % Math.max(1, this.textures.meat.width - 150);
+        const sy = (v * 167) % Math.max(1, this.textures.meat.height - 150);
+        c.drawImage(this.textures.meat, sx, sy, 140, 140, -18, -18, 36, 36);
+      } else {
+        const g = c.createLinearGradient(-16, -15, 16, 15);
+        g.addColorStop(0, '#d98c5f');
+        g.addColorStop(0.5, '#8c3b1e');
+        g.addColorStop(1, '#4a1b0c');
+        c.fillStyle = g;
+        c.fillRect(-16, -15, 32, 30);
+      }
 
-    // 黒光りする打ち出し鋳鉄PBRマテリアル (実写シーズニング ＋ 職人手打ち槌目ノーマルマップ)
-    const wokMat = new THREE.MeshStandardMaterial({
-      map: wokTex,
-      normalMap: wokNormal,
-      normalScale: new THREE.Vector2(0.65, 0.65),
-      roughness: 0.22,
-      metalness: 0.86,
-      side: THREE.DoubleSide
-    });
+      // 立体ベベル＆タレの照りハイライト
+      c.strokeStyle = 'rgba(60, 20, 8, 0.65)';
+      c.lineWidth = 2.5;
+      c.strokeRect(-15, -14, 30, 28);
 
-    this.wokMesh = new THREE.Mesh(wokGeom, wokMat);
-    this.wokMesh.receiveShadow = true;
-    this.scene.add(this.wokMesh);
+      c.fillStyle = 'rgba(255, 240, 220, 0.55)';
+      c.beginPath();
+      c.ellipse(-6, -6, 6, 2.2, -0.3, 0, Math.PI * 2);
+      c.fill();
 
-    // 木製ハンドル（手前）＋ 金属補強バンド
-    const handleGroup = new THREE.Group();
-    const handleGeom = new THREE.CylinderGeometry(0.06, 0.08, 0.72, 16);
-    const handleMat = new THREE.MeshStandardMaterial({
-      color: 0x3d2413,
-      roughness: 0.40,
-      metalness: 0.05
-    });
-    const handle = new THREE.Mesh(handleGeom, handleMat);
-    handle.rotation.x = Math.PI / 2.3;
-    handle.position.set(0, 0.35, R + 0.35);
-    handleGroup.add(handle);
+      c.restore();
+      this.sprites.meatCubes.push(cv);
+    }
 
-    const ringGeom = new THREE.CylinderGeometry(0.075, 0.075, 0.06, 16);
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: 0x999999,
-      roughness: 0.25,
-      metalness: 0.90
-    });
-    const ring = new THREE.Mesh(ringGeom, ringMat);
-    ring.rotation.x = Math.PI / 2.3;
-    ring.position.set(0, 0.18, R + 0.12);
-    handleGroup.add(ring);
+    // 4. 小口切り長ネギスプライト（8バリエーション：実写onion_diffuse.jpg切り抜き）
+    for (let v = 0; v < 8; v++) {
+      const sz = 40;
+      const cv = document.createElement('canvas');
+      cv.width = sz;
+      cv.height = sz;
+      const c = cv.getContext('2d');
 
-    this.wokMesh.add(handleGroup);
+      c.save();
+      c.translate(sz / 2, sz / 2);
+      // 外輪と中空の輪切り形状
+      c.beginPath();
+      c.arc(0, 0, 12.5, 0, Math.PI * 2);
+      if (v % 2 === 0) {
+        c.arc(0, 0, 4.2, 0, Math.PI * 2, true);
+      }
+      c.closePath();
+      c.clip();
 
-    // Rapier Trimesh コライダー（お椀型の当たり判定）
-    const float32Verts = new Float32Array(vertices);
-    const uint32Indices = new Uint32Array(indices);
-    const wokColliderDesc = RAPIER.ColliderDesc.trimesh(float32Verts, uint32Indices);
+      if (this.textures.onion) {
+        const sx = (v * 113) % Math.max(1, this.textures.onion.width - 130);
+        const sy = (v * 151) % Math.max(1, this.textures.onion.height - 130);
+        c.drawImage(this.textures.onion, sx, sy, 120, 120, -15, -15, 30, 30);
+      } else {
+        const g = c.createRadialGradient(0, 0, 3, 0, 0, 13);
+        g.addColorStop(0, '#e8f5e9');
+        g.addColorStop(0.55, '#66bb6a');
+        g.addColorStop(1, '#2e7d32');
+        c.fillStyle = g;
+        c.fillRect(-14, -14, 28, 28);
+      }
 
-    // 物理特性：油でヌルッと滑る低摩擦(0.08) ＋ 跳ねすぎない反発(0.18)
-    wokColliderDesc.setFriction(0.08);
-    wokColliderDesc.setRestitution(0.18);
+      // みずみずしい断面リム
+      c.strokeStyle = 'rgba(220, 255, 210, 0.6)';
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.arc(0, 0, 11.5, 0, Math.PI * 2);
+      c.stroke();
 
-    const wokBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased();
-    this.wokRigidBody = this.world.createRigidBody(wokBodyDesc);
-    this.world.createCollider(wokColliderDesc, this.wokRigidBody);
+      c.restore();
+      this.sprites.onionRings.push(cv);
+    }
   }
 
-  // --- 米粒 ＆ 具材の剛体初期化（最初は全具材が画面外・非表示の空鍋スタート） ---
-  buildRiceAndIngredients() {
-    const texLoader = new THREE.TextureLoader();
-    const riceTex = texLoader.load('textures/rice_diffuse.jpg');
-    riceTex.colorSpace = THREE.SRGBColorSpace;
-
-    const meatTex = texLoader.load('textures/meat_diffuse.jpg');
-    meatTex.colorSpace = THREE.SRGBColorSpace;
-
-    const onionTex = texLoader.load('textures/onion_diffuse.jpg');
-    onionTex.colorSpace = THREE.SRGBColorSpace;
-
-    const eggTex = texLoader.load('textures/egg_diffuse.jpg');
-    eggTex.colorSpace = THREE.SRGBColorSpace;
-
-    const dummy = new THREE.Object3D();
-    dummy.position.set(0, 10, 0);
-    dummy.updateMatrix();
-
-    // 1. 米粒 InstancedMesh (240粒: 油膜でコーティングされた粒立ち白米)
-    const riceGeom = new THREE.SphereGeometry(0.046, 8, 8);
-    riceGeom.scale(1.0, 0.78, 1.4); // 実物大の米粒形状
-
-    const riceMat = new THREE.MeshStandardMaterial({
-      map: riceTex,
-      roughness: 0.16, // 油のツヤ・濡れ感
-      metalness: 0.02
-    });
-
-    this.riceInstancedMesh = new THREE.InstancedMesh(riceGeom, riceMat, this.riceCount);
-    this.riceInstancedMesh.castShadow = true;
-    this.riceInstancedMesh.receiveShadow = true;
-    this.riceInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.riceInstancedMesh.visible = false;
-    this.scene.add(this.riceInstancedMesh);
-
-    const defaultColor = new THREE.Color(0xffffff);
-
-    for (let i = 0; i < this.riceCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(0, 10, 0)
-        .setLinearDamping(0.15)
-        .setAngularDamping(0.25);
-
-      const body = this.world.createRigidBody(bodyDesc);
-      body.setEnabled(false); // 初期は画面外＆非アクティブ
-
-      const colliderDesc = RAPIER.ColliderDesc.ball(0.045)
-        .setFriction(0.08)
-        .setRestitution(0.18);
-      this.world.createCollider(colliderDesc, body);
-
-      this.riceBodies.push(body);
-      this.riceBurnTimers[i] = 0;
-
-      this.riceInstancedMesh.setMatrixAt(i, dummy.matrix);
-      this.riceInstancedMesh.setColorAt(i, defaultColor);
-    }
-    this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
-    if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
-
-    // 2. ふんわり炒り卵 InstancedMesh (48個: 実写半熟テクスチャ ＋ 温かな黄金グロー)
-    const eggGeom = new THREE.SphereGeometry(0.082, 8, 7);
-    eggGeom.scale(1.35, 0.75, 1.15); // ふんわりほぐれた半熟そぼろ形状
-    const eggMat = new THREE.MeshStandardMaterial({
-      map: eggTex,
-      color: 0xfff0aa,
-      roughness: 0.32,
-      metalness: 0.0,
-      emissive: 0x221800 // 鍋底の影でも鮮やかに見える自発光
-    });
-    this.eggInstancedMesh = new THREE.InstancedMesh(eggGeom, eggMat, this.eggCount);
-    this.eggInstancedMesh.castShadow = true;
-    this.eggInstancedMesh.visible = false;
-    this.scene.add(this.eggInstancedMesh);
-
-    for (let i = 0; i < this.eggCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
-      const body = this.world.createRigidBody(bodyDesc);
-      body.setEnabled(false);
-      const colliderDesc = RAPIER.ColliderDesc.ball(0.07)
-        .setFriction(0.10)
-        .setRestitution(0.20);
-      this.world.createCollider(colliderDesc, body);
-      this.eggBodies.push(body);
-      this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
-    }
-    this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
-
-    // 3. チャーシュー InstancedMesh (24個: 秘伝ダレの照りと脂身)
-    const meatGeom = new THREE.BoxGeometry(0.09, 0.09, 0.09);
-    const meatMat = new THREE.MeshStandardMaterial({
-      map: meatTex,
-      roughness: 0.28,
-      metalness: 0.05
-    });
-    this.meatInstancedMesh = new THREE.InstancedMesh(meatGeom, meatMat, this.meatCount);
-    this.meatInstancedMesh.castShadow = true;
-    this.meatInstancedMesh.visible = false;
-    this.scene.add(this.meatInstancedMesh);
-
-    for (let i = 0; i < this.meatCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
-      const body = this.world.createRigidBody(bodyDesc);
-      body.setEnabled(false);
-      const colliderDesc = RAPIER.ColliderDesc.cuboid(0.045, 0.045, 0.045)
-        .setFriction(0.12)
-        .setRestitution(0.2);
-      this.world.createCollider(colliderDesc, body);
-      this.meatBodies.push(body);
-      this.meatInstancedMesh.setMatrixAt(i, dummy.matrix);
-    }
-    this.meatInstancedMesh.instanceMatrix.needsUpdate = true;
-
-    // 4. 長ネギ InstancedMesh (28個: シャキシャキ小口切り)
-    const onionGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.045, 12);
-    const onionMat = new THREE.MeshStandardMaterial({
-      map: onionTex,
-      roughness: 0.32,
-      metalness: 0.0
-    });
-    this.onionInstancedMesh = new THREE.InstancedMesh(onionGeom, onionMat, this.onionCount);
-    this.onionInstancedMesh.castShadow = true;
-    this.onionInstancedMesh.visible = false;
-    this.scene.add(this.onionInstancedMesh);
-
-    for (let i = 0; i < this.onionCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
-      const body = this.world.createRigidBody(bodyDesc);
-      body.setEnabled(false);
-      const colliderDesc = RAPIER.ColliderDesc.cylinder(0.023, 0.05)
-        .setFriction(0.1)
-        .setRestitution(0.22);
-      this.world.createCollider(colliderDesc, body);
-      this.onionBodies.push(body);
-      this.onionInstancedMesh.setMatrixAt(i, dummy.matrix);
-    }
-    this.onionInstancedMesh.instanceMatrix.needsUpdate = true;
-  }
-  }
-
-  // --- 湯気・煙パーティクル ---
-  buildSmokeSystem() {
-    const particleCount = 80;
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const alphas = new Float32Array(particleCount);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i * 3 + 0] = (Math.random() - 0.5) * 0.8;
-      positions[i * 3 + 1] = Math.random() * 1.5;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 0.8;
-      alphas[i] = Math.random();
-
-      this.smokeParticles.push({
-        x: positions[i * 3 + 0],
-        y: positions[i * 3 + 1],
-        z: positions[i * 3 + 2],
-        vy: 0.4 + Math.random() * 0.6,
-        alpha: alphas[i]
+  buildInitialSteam() {
+    this.steamParticles = [];
+    for (let i = 0; i < 28; i++) {
+      this.steamParticles.push({
+        x: (Math.random() - 0.5) * 1.1,
+        y: (Math.random() - 0.5) * 1.1,
+        z: Math.random() * 1.2,
+        vx: (Math.random() - 0.5) * 0.15,
+        vy: -0.15 - Math.random() * 0.25,
+        vz: 0.35 + Math.random() * 0.45,
+        size: 35 + Math.random() * 55,
+        alpha: 0.08 + Math.random() * 0.12
       });
     }
-
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const mat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.12,
-      transparent: true,
-      opacity: 0.25,
-      blending: THREE.NormalBlending,
-      depthWrite: false
-    });
-
-    this.smokeSystem = new THREE.Points(geom, mat);
-    this.scene.add(this.smokeSystem);
   }
 
-  // --- 入力イベント（センサー ＆ キーボード） ---
-  bindEvents() {
-    window.addEventListener('resize', () => {
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.setupCameraForAspect();
-    });
+  // --- スマホ縦画面・PC横画面で下部ボタンと絶対に重ならないレスポンシブ配置 ---
+  handleResize() {
+    this.viewW = window.innerWidth;
+    this.viewH = window.innerHeight;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    // センサー許可ボタン
+    this.canvas.width = Math.floor(this.viewW * this.dpr);
+    this.canvas.height = Math.floor(this.viewH * this.dpr);
+
+    // 上部HUDと下部パレットの実測高さを取得して、その間の空き領域の中央に中華鍋を配置
+    const statusBar = document.getElementById('status-bar');
+    const meters = document.getElementById('meters-container');
+    const palette = document.getElementById('action-palette');
+    const debugPanel = document.getElementById('debug-panel');
+
+    const topUsed = (statusBar ? statusBar.offsetHeight : 54) + (meters ? meters.offsetHeight : 36) + 10;
+    const bottomUsed = (palette ? palette.offsetHeight : 148) + (debugPanel ? debugPanel.offsetHeight : 24) + 12;
+
+    const availH = Math.max(220, this.viewH - topUsed - bottomUsed);
+    const availW = this.viewW;
+
+    this.wokCenterX = availW * 0.5;
+    // 下部に木柄が伸びるため、鍋の中心を空き領域のやや上寄りに配置
+    this.wokCenterY = topUsed + availH * 0.44;
+    this.wokRadiusPx = Math.min(availW * 0.41, availH * 0.41);
+
+    // 鍋肌ガイドのサイズも同期
+    const rimEl = document.getElementById('rim-guide');
+    if (rimEl) {
+      const d = Math.round(this.wokRadiusPx * 1.75);
+      rimEl.style.width = `${d}px`;
+      rimEl.style.height = `${d}px`;
+      rimEl.style.top = `${Math.round(this.wokCenterY)}px`;
+      rimEl.style.left = `${Math.round(this.wokCenterX)}px`;
+    }
+  }
+
+  // --- イベントバインディング（スマホセンサー・タッチドラッグ・キーボード） ---
+  bindEvents() {
+    window.addEventListener('resize', () => this.handleResize());
+
+    // 画面上のどこをタップしても自動で音声＆iOSモーションセンサーを有効化
+    const unlockAll = () => {
+      this.audio.init();
+      if (!this.sensorActive) {
+        this.requestDevicePermissions();
+      }
+    };
+    window.addEventListener('pointerdown', unlockAll, { passive: true });
+    window.addEventListener('touchstart', unlockAll, { passive: true });
+
     const sensorBtn = document.getElementById('btn-enable-sensor');
     if (sensorBtn) {
-      sensorBtn.addEventListener('click', () => {
+      sensorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         this.audio.init();
-        this.requestDevicePermissions().then(() => {
-          const banner = document.getElementById('sensor-banner');
-          if (banner) banner.classList.add('hidden');
-        });
+        this.requestDevicePermissions();
       });
     }
 
-    // 初回ユーザーインタラクションでの音声アクティベート
-    window.addEventListener('pointerdown', () => {
-      this.audio.init();
-    }, { once: true });
-
-    // リトライ
+    // もう一丁作る！（完全リセット＆再スタート）
     const retryBtn = document.getElementById('btn-retry');
     if (retryBtn) {
       retryBtn.addEventListener('click', () => {
+        this.audio.init();
         this.resetGame();
         this.startGame();
       });
     }
 
-    // 具材ボタン
+    // 具材・アクションボタン
     document.getElementById('btn-egg').addEventListener('click', () => this.addIngredient('egg'));
     document.getElementById('btn-rice').addEventListener('click', () => this.addIngredient('rice'));
     document.getElementById('btn-meat').addEventListener('click', () => this.addIngredient('meat'));
@@ -698,46 +696,102 @@ class GokuChahan3D {
     document.getElementById('btn-soy').addEventListener('click', () => this.addSoy());
     document.getElementById('btn-ladle').addEventListener('click', () => this.gatherLadle());
 
-    // デバッグボタン
-    document.getElementById('btn-debug-toss').addEventListener('click', () => this.triggerToss(1.0));
+    // デバッグ・PC操作ボタン
+    document.getElementById('btn-debug-toss').addEventListener('click', () => this.triggerToss(1.15));
     document.getElementById('btn-debug-flip').addEventListener('click', () => this.triggerFlip());
+
+    // タッチ＆マウスによる直接「鍋の柄を握って振る」1:1インタラクション
+    this.canvas.addEventListener('pointerdown', (e) => {
+      this.isPointerDown = true;
+      this.lastPointerX = e.clientX;
+      this.lastPointerY = e.clientY;
+      this.lastPointerTime = performance.now();
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!this.isPointerDown) return;
+      const now = performance.now();
+      const dt = Math.max(0.008, (now - this.lastPointerTime) / 1000);
+      const dx = (e.clientX - this.lastPointerX) / this.wokRadiusPx;
+      const dy = (e.clientY - this.lastPointerY) / this.wokRadiusPx;
+
+      this.lastPointerX = e.clientX;
+      this.lastPointerY = e.clientY;
+      this.lastPointerTime = now;
+
+      // 鍋のリアルタイム移動と慣性力注入
+      this.wokVx += dx * 14.0;
+      this.wokVy += dy * 14.0;
+      this.applyContinuousWokForce(dx / dt, dy / dt, 0);
+
+      // 素早いスナップ操作で本格的な「あおり（小翻）」を発動
+      const speed = Math.hypot(dx / dt, dy / dt);
+      if (speed > 3.2 && now - this.lastTossDetectTime > 210) {
+        const power = Math.min(1.6, Math.max(0.75, speed / 5.0));
+        this.triggerToss(power, dx * 2.0, dy * 2.0);
+        this.lastTossDetectTime = now;
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      this.isPointerDown = false;
+    });
 
     // PCキーボード操作
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         e.preventDefault();
-        this.triggerToss(1.0);
+        this.audio.init();
+        this.triggerToss(1.15);
       } else if (e.code === 'KeyF') {
         this.triggerFlip();
       } else if (e.code === 'ArrowLeft') {
-        this.wokTiltZ = Math.min(0.25, this.wokTiltZ + 0.08);
+        this.wokVx -= 1.8;
+        this.tiltX = Math.max(-0.4, this.tiltX - 0.12);
+        this.applyContinuousWokForce(-4.0, 0, 0);
       } else if (e.code === 'ArrowRight') {
-        this.wokTiltZ = Math.max(-0.25, this.wokTiltZ - 0.08);
+        this.wokVx += 1.8;
+        this.tiltX = Math.min(0.4, this.tiltX + 0.12);
+        this.applyContinuousWokForce(4.0, 0, 0);
       } else if (e.code === 'ArrowUp') {
-        this.wokTiltX = Math.max(-0.25, this.wokTiltX - 0.08);
+        this.wokVy -= 1.8;
+        this.tiltY = Math.max(-0.4, this.tiltY - 0.12);
+        this.applyContinuousWokForce(0, -4.0, 0);
       } else if (e.code === 'ArrowDown') {
-        this.wokTiltX = Math.min(0.25, this.wokTiltX + 0.08);
+        this.wokVy += 1.8;
+        this.tiltY = Math.min(0.4, this.tiltY + 0.12);
+        this.applyContinuousWokForce(0, 4.0, 0);
       }
     });
 
-    // モーションセンサー監視
     this.setupSensors();
   }
 
   async requestDevicePermissions() {
     const statusEl = document.getElementById('sensor-status');
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-      try {
-        const response = await DeviceMotionEvent.requestPermission();
-        if (response === 'granted') {
-          statusEl.textContent = 'センサー許可済み (iOS)';
+    const banner = document.getElementById('sensor-banner');
+    try {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const res = await DeviceMotionEvent.requestPermission();
+        if (res === 'granted') {
+          this.sensorActive = true;
+          if (statusEl) statusEl.textContent = 'センサー連動中 (スマホを振って鍋をあおれ！)';
+          if (banner) setTimeout(() => banner.classList.add('hidden'), 1200);
         }
-      } catch (err) {
-        console.warn('Sensor permission error:', err);
+      } else {
+        this.sensorActive = true;
+        if (statusEl) statusEl.textContent = 'センサー連動中';
+        if (banner) setTimeout(() => banner.classList.add('hidden'), 1500);
       }
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        await DeviceOrientationEvent.requestPermission();
+      }
+    } catch (err) {
+      console.warn('Sensor permission notice:', err);
     }
   }
 
+  // --- スマホの加速度・ジャイロと中華鍋の1:1完全シンクロ ---
   setupSensors() {
     window.addEventListener('devicemotion', (e) => {
       if (this.gameState !== 'COOKING' && this.gameState !== 'LADLED') return;
@@ -746,142 +800,64 @@ class GokuChahan3D {
       const accG = e.accelerationIncludingGravity;
       if (!acc) return;
 
+      const ax = acc.x || 0;
       const ay = acc.y || 0;
       const az = acc.z || 0;
 
-      document.getElementById('dbg-ay').textContent = ay.toFixed(1);
-      document.getElementById('dbg-az').textContent = az.toFixed(1);
+      const dbgAy = document.getElementById('dbg-ay');
+      const dbgAz = document.getElementById('dbg-az');
+      if (dbgAy) dbgAy.textContent = ay.toFixed(1);
+      if (dbgAz) dbgAz.textContent = az.toFixed(1);
+
+      // 1. 毎フレームのスマホの揺れを直接中華鍋の変位速度＆具材への慣性力に変換！
+      // これにより「スマホを少し動かすだけで鍋と油と米がリアルタイムに連動して動く」没入感を実現
+      this.wokVx += npClamp(ax * 0.08, -1.2, 1.2);
+      this.wokVy += npClamp(-ay * 0.08, -1.2, 1.2);
+      this.wokVz += npClamp(az * 0.05, -0.6, 0.8);
+
+      this.applyContinuousWokForce(ax * 0.45, -ay * 0.45, az * 0.35);
 
       const now = performance.now();
+      const totalShake = Math.hypot(ax, ay, az);
 
-      // 手首のスナップ判定：手前に引く(-ay) ＋ 上へ持ち上げる(+az)
+      // 2. 手首のスナップや振りで本格的な「鍋あおり（小翻）」を発動
+      // 従来の厳しい制限を撤廃し、手前に引く・上に振る・前後にシェイクする動作すべてに高感度応答
       if (this.gameState === 'COOKING') {
-        if (ay < -2.6 && az > 2.4) {
-          if (now - this.lastTossDetectTime > 230) {
-            const power = Math.min(2.2, Math.max(0.7, (Math.abs(ay) + Math.abs(az)) / 7.5));
-            this.triggerToss(power);
-            this.lastTossDetectTime = now;
-          }
+        const isSnapToss = (ay < -2.0 && az > 1.6) || totalShake > 4.2;
+        if (isSnapToss && now - this.lastTossDetectTime > 190) {
+          const power = npClamp(totalShake / 6.0, 0.75, 1.65);
+          this.triggerToss(power, ax * 0.15, -ay * 0.15);
+          this.lastTossDetectTime = now;
         }
       }
 
-      // お玉まとめ後のひっくり返し判定（Z軸重力反転）
-      if (this.gameState === 'LADLED' && accG) {
-        if (accG.z < -3.5) {
+      // 3. お玉まとめ後の皿盛り（スマホを返す動作または強い振り）
+      if (this.gameState === 'LADLED') {
+        if ((accG && accG.z < -2.5) || totalShake > 7.5) {
           this.triggerFlip();
         }
       }
-
-      this.lastAccelY = ay;
-      this.lastAccelZ = az;
     });
 
+    // スマホの傾き（重力方向）に連動して油と具材が鍋底を滑る
     window.addEventListener('deviceorientation', (e) => {
-      const pitch = e.beta || 0;
-      if (this.gameState === 'LADLED' && Math.abs(pitch) > 105) {
+      const gamma = e.gamma || 0; // 左右傾き (-90〜90)
+      const beta = e.beta || 0;   // 前後傾き (-180〜180)
+
+      this.tiltX = npClamp(gamma / 45.0, -0.55, 0.55);
+      this.tiltY = npClamp((beta - 35) / 45.0, -0.55, 0.55);
+
+      if (this.gameState === 'LADLED' && Math.abs(beta) > 100) {
         this.triggerFlip();
       }
     });
   }
 
-  spawnEgg() {
-    this.eggSpawned = true;
-    this.eggInstancedMesh.visible = true;
-    const dummy = new THREE.Object3D();
-    this.eggBodies.forEach((body, i) => {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.35);
-      const x = Math.cos(a) * r;
-      const y = 0.16 + Math.random() * 0.10;
-      const z = Math.sin(a) * r;
-      body.setTranslation({ x, y, z }, true);
-      body.setEnabled(true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
-      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
-
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      dummy.updateMatrix();
-      this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
-    });
-    this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  spawnRice() {
-    this.riceInstancedMesh.visible = true;
-    const dummy = new THREE.Object3D();
-    const defaultColor = new THREE.Color(0xffffff);
-    this.riceBodies.forEach((body, i) => {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.34);
-      const x = Math.cos(a) * r;
-      const y = 0.22 + Math.random() * 0.20;
-      const z = Math.sin(a) * r;
-      body.setTranslation({ x, y, z }, true);
-      body.setEnabled(true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.25, y: 0.3 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.25 }, true);
-      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
-      this.riceBurnTimers[i] = 0;
-
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      dummy.updateMatrix();
-      this.riceInstancedMesh.setMatrixAt(i, dummy.matrix);
-      this.riceInstancedMesh.setColorAt(i, defaultColor);
-    });
-    this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
-    if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
-  }
-
-  spawnMeat() {
-    this.meatSpawned = true;
-    this.meatInstancedMesh.visible = true;
-    const dummy = new THREE.Object3D();
-    this.meatBodies.forEach((body, i) => {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.36);
-      const x = Math.cos(a) * r;
-      const y = 0.30 + Math.random() * 0.15;
-      const z = Math.sin(a) * r;
-      body.setTranslation({ x, y, z }, true);
-      body.setEnabled(true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
-      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
-
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      dummy.updateMatrix();
-      this.meatInstancedMesh.setMatrixAt(i, dummy.matrix);
-    });
-    this.meatInstancedMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  spawnOnion() {
-    this.onionSpawned = true;
-    this.onionInstancedMesh.visible = true;
-    const dummy = new THREE.Object3D();
-    this.onionBodies.forEach((body, i) => {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.36);
-      const x = Math.cos(a) * r;
-      const y = 0.30 + Math.random() * 0.15;
-      const z = Math.sin(a) * r;
-      body.setTranslation({ x, y, z }, true);
-      body.setEnabled(true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
-      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
-
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      dummy.updateMatrix();
-      this.onionInstancedMesh.setMatrixAt(i, dummy.matrix);
-    });
-    this.onionInstancedMesh.instanceMatrix.needsUpdate = true;
-  }
-
+  // --- ゲーム開始・完全リセット ---
   startGame() {
     this.gameState = 'COOKING';
     this.audio.isCooking = true;
+
     const startScreen = document.getElementById('start-screen');
     if (startScreen) startScreen.classList.remove('active');
     const resultScreen = document.getElementById('result-screen');
@@ -890,19 +866,14 @@ class GokuChahan3D {
     this.timeRemaining = 45.0;
     this.score = 0;
     this.combo = 0;
+    this.maxCombo = 0;
     this.dryness = 0;
-    this.heat = 35;
+    this.heat = 38;
     this.burnAmount = 0;
     this.wokHeiActive = false;
     this.wokHeiTossCount = 0;
 
-    // 最初は油を引いて熱した「空の中華鍋」からスタート！
-    this.riceInstancedMesh.visible = false;
-    this.eggInstancedMesh.visible = false;
-    this.meatInstancedMesh.visible = false;
-    this.onionInstancedMesh.visible = false;
-
-    // ボタン初期状態: まずは溶き卵のみアクティブ
+    // 最初は溶き卵ボタンのみ有効（空の熱々中華鍋からスタート！）
     document.getElementById('btn-egg').disabled = false;
     document.getElementById('btn-rice').disabled = true;
     document.getElementById('btn-meat').disabled = true;
@@ -910,54 +881,168 @@ class GokuChahan3D {
     document.getElementById('btn-soy').disabled = true;
     document.getElementById('btn-ladle').disabled = true;
 
+    const dbgCount = document.getElementById('dbg-count');
+    if (dbgCount) dbgCount.textContent = '0';
+
     this.showFeedback('熱々の油に【🥚溶き卵】を投入せよ！', '#ffca28');
   }
 
   resetGame() {
-    for (const key in this.ingredients) this.ingredients[key] = false;
-    for (const key in this.timings) this.timings[key] = 0;
-    this.eggSpawned = false;
-    this.meatSpawned = false;
-    this.onionSpawned = false;
+    for (const k in this.ingredients) this.ingredients[k] = false;
+    for (const k in this.timings) this.timings[k] = 0;
 
-    if (this.riceInstancedMesh) this.riceInstancedMesh.visible = false;
-    if (this.eggInstancedMesh) this.eggInstancedMesh.visible = false;
-    if (this.meatInstancedMesh) this.meatInstancedMesh.visible = false;
-    if (this.onionInstancedMesh) this.onionInstancedMesh.visible = false;
+    // すべての具材配列を完全に空にする（最初から何か入っている状態を100%排除）
+    this.eggPool = null;
+    this.eggParticles = [];
+    this.riceParticles = [];
+    this.meatParticles = [];
+    this.onionParticles = [];
+    this.oilSparks = [];
+    this.soyBubbles = [];
 
-    // 全剛体を画面外(0, 10, 0)へ完全退避＆無効化＆速度リセット
-    const resetBody = (b) => {
-      b.setEnabled(false);
-      b.setTranslation({ x: 0, y: 10, z: 0 }, true);
-      b.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      b.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    };
-    this.riceBodies.forEach((body, i) => {
-      resetBody(body);
-      this.riceBurnTimers[i] = 0;
-    });
-    this.eggBodies.forEach(resetBody);
-    this.meatBodies.forEach(resetBody);
-    this.onionBodies.forEach(resetBody);
+    this.wokX = 0;
+    this.wokY = 0;
+    this.wokZ = 0;
+    this.wokVx = 0;
+    this.wokVy = 0;
+    this.wokVz = 0;
 
-    // リザルト画面・鍋肌ガイドを確実に隠す
     const resultScreen = document.getElementById('result-screen');
     if (resultScreen) resultScreen.classList.remove('active');
     const rimEl = document.getElementById('rim-guide');
     if (rimEl) rimEl.classList.remove('active');
+    const banner = document.getElementById('wok-hei-banner');
+    if (banner) banner.classList.remove('active');
 
-    // UIリセット
+    document.getElementById('time-val').textContent = '45';
     document.getElementById('meter-dryness').style.width = '0%';
     document.getElementById('val-dryness').textContent = '0%';
-    document.getElementById('meter-heat').style.width = '35%';
-    document.getElementById('val-heat').textContent = '35%';
+    document.getElementById('meter-heat').style.width = '38%';
+    document.getElementById('val-heat').textContent = '38%';
     document.getElementById('combo-display').textContent = 'COMBO 0';
     document.getElementById('score-val').textContent = '0';
+  }
+
+  // --- 具材のスポーン処理 ---
+  spawnEgg() {
+    // 1. 鍋底の熱々オイルの上に広がる液状〜半熟卵プール
+    this.eggPool = {
+      radius: 0.05,
+      targetRadius: 0.42,
+      cookProgress: 0,
+      alpha: 0.95,
+      bubbles: Array.from({ length: 22 }, () => ({
+        angle: Math.random() * Math.PI * 2,
+        dist: 0.15 + Math.random() * 0.82,
+        r: 0.02 + Math.random() * 0.035,
+        phase: Math.random() * Math.PI * 2
+      }))
+    };
+
+    // 2. ふんわり半熟炒り卵そぼろ塊 (56個)
+    this.eggParticles = [];
+    for (let i = 0; i < 56; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * 0.38;
+      this.eggParticles.push({
+        kind: 'egg',
+        x: Math.cos(a) * r,
+        y: Math.sin(a) * r,
+        z: 0.12 + Math.random() * 0.15,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        vz: 0.3 + Math.random() * 0.4,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 3.0,
+        scale: 0.52 + Math.random() * 0.42,
+        variant: i % Math.max(1, this.sprites.eggCurds.length)
+      });
+    }
+    this.updateDebugCount();
+  }
+
+  spawnRice() {
+    this.riceParticles = [];
+    const count = 650;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      // 最初はほぐれる前のお椀型の白飯塊として中央に投入
+      const r = Math.pow(Math.random(), 0.65) * 0.34;
+      this.riceParticles.push({
+        kind: 'rice',
+        x: Math.cos(a) * r,
+        y: Math.sin(a) * r,
+        z: 0.18 + Math.random() * 0.28,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: (Math.random() - 0.5) * 0.35,
+        vz: -0.2,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 4.0,
+        scale: 0.82 + Math.random() * 0.32,
+        coat: 0.0,     // 0: 白米, 0.5: 卵コーティング, 1.0: 黄金パラパラ
+        toast: 0.0,    // 焦げ・香ばしさ
+        variant: i % 6
+      });
+    }
+    this.updateDebugCount();
+  }
+
+  spawnMeat() {
+    this.meatParticles = [];
+    for (let i = 0; i < 28; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * 0.38;
+      this.meatParticles.push({
+        kind: 'meat',
+        x: Math.cos(a) * r,
+        y: Math.sin(a) * r,
+        z: 0.25 + Math.random() * 0.25,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        vz: 0.2,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 3.5,
+        scale: 0.62 + Math.random() * 0.28,
+        variant: i % Math.max(1, this.sprites.meatCubes.length)
+      });
+    }
+    this.updateDebugCount();
+  }
+
+  spawnOnion() {
+    this.onionParticles = [];
+    for (let i = 0; i < 38; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * 0.40;
+      this.onionParticles.push({
+        kind: 'onion',
+        x: Math.cos(a) * r,
+        y: Math.sin(a) * r,
+        z: 0.28 + Math.random() * 0.25,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        vz: 0.25,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 4.0,
+        scale: 0.58 + Math.random() * 0.30,
+        variant: i % Math.max(1, this.sprites.onionRings.length)
+      });
+    }
+    this.updateDebugCount();
+  }
+
+  updateDebugCount() {
+    const el = document.getElementById('dbg-count');
+    if (el) {
+      const total = this.eggParticles.length + this.riceParticles.length + this.meatParticles.length + this.onionParticles.length;
+      el.textContent = String(total);
+    }
   }
 
   // --- 調理インタラクション ---
   addIngredient(type) {
     if (this.gameState !== 'COOKING') return;
+    this.audio.init();
     const elapsed = 45.0 - this.timeRemaining;
 
     if (type === 'egg' && !this.ingredients.egg) {
@@ -968,11 +1053,10 @@ class GokuChahan3D {
       this.audio.playAdd();
       this.audio.playSoySizzle();
 
-      // ふんわり半熟炒り卵の3D出現！
       this.spawnEgg();
-      this.showFeedback('半熟のうちに【🍚ご飯】を入れろ！', '#ffca28');
-    }
-    else if (type === 'rice' && this.ingredients.egg && !this.ingredients.rice) {
+      this.vibrate(35);
+      this.showFeedback('ジュワッ！半熟のうちに【🍚ご飯】を投入せよ！', '#ffca28');
+    } else if (type === 'rice' && this.ingredients.egg && !this.ingredients.rice) {
       this.ingredients.rice = true;
       this.timings.rice = elapsed;
       document.getElementById('btn-rice').disabled = true;
@@ -982,439 +1066,742 @@ class GokuChahan3D {
       document.getElementById('btn-ladle').disabled = false;
       this.audio.playAdd();
 
-      // ご飯の3D出現！
       this.spawnRice();
-      const eggRiceDiff = this.timings.rice - this.timings.egg;
-      const isCoatingPerfect = (eggRiceDiff >= 1.0 && eggRiceDiff <= 3.5);
+      this.vibrate(45);
 
-      if (isCoatingPerfect) {
-        this.showFeedback('黄金コーティング成功！(PERFECT)', '#00e676');
+      const eggRiceDiff = this.timings.rice - this.timings.egg;
+      if (eggRiceDiff >= 0.8 && eggRiceDiff <= 4.2) {
+        this.showFeedback('黄金コーティング成功！スマホを振って鍋をあおれ！', '#00e676');
         this.addScore(800);
+        this.riceParticles.forEach((p) => { p.coat = 0.45; });
       } else {
-        this.showFeedback('米投入！【Space】で鍋をあおってほぐせ！', '#ffb300');
+        this.showFeedback('ご飯投入！スマホを振って（またはドラッグ/Spaceで）鍋をあおれ！', '#ffb300');
       }
-    }
-    else if (type === 'meat' && this.ingredients.rice && !this.ingredients.meat) {
+    } else if (type === 'meat' && this.ingredients.rice && !this.ingredients.meat) {
       this.ingredients.meat = true;
       this.timings.meat = elapsed;
       document.getElementById('btn-meat').disabled = true;
       this.audio.playAdd();
 
       this.spawnMeat();
-      this.showFeedback('チャーシュー投入！', '#ff9800');
-    }
-    else if (type === 'greenonion' && this.ingredients.rice && !this.ingredients.greenonion) {
+      this.vibrate(30);
+      this.showFeedback('秘伝チャーシュー投入！さらに鍋を振って旨味を絡めろ！', '#ff9800');
+      this.addScore(400);
+    } else if (type === 'greenonion' && this.ingredients.rice && !this.ingredients.greenonion) {
       this.ingredients.greenonion = true;
       this.timings.greenonion = elapsed;
       document.getElementById('btn-greenonion').disabled = true;
       this.audio.playAdd();
 
       this.spawnOnion();
-      if (this.timeRemaining <= 15.0 && this.timeRemaining >= 3.0) {
-        this.showFeedback('シャキシャキネギ！(PERFECT)', '#00e676');
+      this.vibrate(30);
+      if (this.timeRemaining <= 18.0 && this.timeRemaining >= 2.0) {
+        this.showFeedback('シャキシャキ長ネギ！(PERFECT TIMING)', '#00e676');
         this.addScore(600);
       } else {
-        this.showFeedback('ネギ投入！', '#8bc34a');
+        this.showFeedback('長ネギ投入！', '#8bc34a');
+        this.addScore(300);
       }
     }
   }
 
   addSoy() {
     if (this.gameState !== 'COOKING' || !this.ingredients.rice || this.ingredients.soy) return;
+    this.audio.init();
     this.ingredients.soy = true;
     this.timings.soy = 45.0 - this.timeRemaining;
     document.getElementById('btn-soy').disabled = true;
 
     this.audio.playSoySizzle();
+    this.vibrate([40, 30, 60]);
     this.wokHeiActive = true;
     this.wokHeiTossCount = 0;
 
+    // 鍋肌に焦がし醤油の沸騰リングを生成
+    this.soyBubbles = [];
+    for (let i = 0; i < 42; i++) {
+      const ang = (i / 42) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+      const dist = 0.64 + Math.random() * 0.18;
+      this.soyBubbles.push({
+        x: Math.cos(ang) * dist,
+        y: Math.sin(ang) * dist,
+        r: 4 + Math.random() * 8,
+        life: 1.0
+      });
+    }
+
+    // 鑊気（ウォックヘイ）の白煙を一気に立ち上らせる
+    for (let i = 0; i < 20; i++) {
+      this.steamParticles.push({
+        x: (Math.random() - 0.5) * 0.9,
+        y: (Math.random() - 0.5) * 0.9,
+        z: 0.1,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: -0.3 - Math.random() * 0.4,
+        vz: 0.7 + Math.random() * 0.6,
+        size: 55 + Math.random() * 65,
+        alpha: 0.38,
+        temp: true
+      });
+    }
+
     const banner = document.getElementById('wok-hei-banner');
-    banner.classList.add('active');
-    setTimeout(() => banner.classList.remove('active'), 1600);
+    if (banner) {
+      banner.classList.add('active');
+      setTimeout(() => banner.classList.remove('active'), 1700);
+    }
 
-    // 激しい煙演出
-    this.smokeSystem.material.opacity = 0.8;
-    setTimeout(() => { this.smokeSystem.material.opacity = 0.25; }, 1800);
-
-    this.showFeedback('鍋肌醤油！即座に煽って香りを閉じ込めろ！', '#ff5722');
+    this.showFeedback('ジュワァァッ！鍋肌醤油！今すぐ鍋を振って香りを閉じ込めろ！', '#ff5722');
   }
 
   gatherLadle() {
     if (this.gameState !== 'COOKING' || !this.ingredients.rice) return;
+    this.audio.init();
     this.gameState = 'LADLED';
     this.ingredients.ladled = true;
+    document.getElementById('btn-ladle').disabled = true;
     this.audio.playAdd();
+    this.vibrate(50);
 
-    // お玉の中心へ全剛体を引き寄せる
-    this.riceBodies.forEach((body) => {
-      const pos = body.translation();
-      const dx = -pos.x;
-      const dz = -pos.z;
-      body.setLinvel({ x: dx * 2.5, y: 0.5, z: dz * 2.5 }, true);
-    });
-
-    this.showFeedback('端末をパカッと裏返して皿へ盛れ！', '#42a5f5');
+    this.showFeedback('お玉でドーム成形完了！スマホを返すか【盛る(F)】で皿へ盛れ！', '#42a5f5');
+    // 2.2秒後に自動で皿盛り完了する安心設計（センサー・キーでも即発動可能）
+    this.ladleCompleteTimer = 2.2;
   }
 
   triggerFlip() {
     if (this.gameState !== 'LADLED') return;
     this.audio.playPlating();
+    this.vibrate([50, 40, 80]);
     this.finishGame();
   }
 
-  // --- 鍋煽り物理インパルス注入（Rapier.js） ---
-  triggerToss(power) {
-    if (this.gameState !== 'COOKING' || !this.ingredients.rice) return;
+  // --- 連続鍋振り慣性力（スマホの細かな揺れに1:1で具材が反応） ---
+  applyContinuousWokForce(fx, fy, fz) {
+    if (!this.ingredients.egg && !this.ingredients.rice) return;
+    const all = this.getAllParticles();
+    const strength = 0.085;
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i];
+      p.vx += fx * strength + (Math.random() - 0.5) * 0.04;
+      p.vy += fy * strength + (Math.random() - 0.5) * 0.04;
+      if (fz > 0.2) {
+        p.vz += Math.min(0.8, fz * 0.12);
+      }
+      if (p.kind === 'rice' && this.ingredients.egg) {
+        p.coat = Math.min(1.0, p.coat + 0.003);
+      }
+    }
+    if (this.ingredients.rice) {
+      this.dryness = Math.min(100, this.dryness + Math.hypot(fx, fy) * 0.015);
+    }
+  }
+
+  // --- 本格鍋あおり（小翻：具材の波が奥から手前へ3D宙返りして鍋中央に戻る） ---
+  triggerToss(power = 1.0, dirX = 0, dirY = -1) {
+    if (this.gameState !== 'COOKING') return;
+    if (!this.ingredients.egg && !this.ingredients.rice) {
+      // 空鍋でも鍋自体はリアルに跳ねる
+      this.wokVy -= 0.85 * power;
+      this.wokVz += 0.65 * power;
+      this.audio.playToss(power * 0.7);
+      this.vibrate(25);
+      return;
+    }
 
     this.audio.playToss(power);
+    this.vibrate(35);
+
+    // 鍋自体のダイナミックな突き出し＆引き戻しリフトモーション
+    this.wokVx += npClamp(dirX * 0.4, -0.8, 0.8);
+    this.wokVy -= 1.15 * power;
+    this.wokVz = Math.min(1.0, this.wokVz + 0.78 * power);
 
     const now = performance.now();
-    if (this.lastTossTime > 0) {
-      const interval = (now - this.lastTossTime) / 1000;
-      // プロの黄金リズム（0.26秒〜0.44秒）
-      if (interval >= 0.25 && interval <= 0.45) {
-        this.combo++;
-        if (this.combo > this.maxCombo) this.maxCombo = this.combo;
-        this.addScore(150 * Math.min(this.combo, 10));
-        this.showFeedback(`PERFECT RHYTHM! (${this.combo} COMBO)`, '#00e676');
-        this.dryness = Math.min(100, this.dryness + 4.0);
+    if (this.ingredients.rice) {
+      if (this.lastTossTime > 0) {
+        const interval = (now - this.lastTossTime) / 1000;
+        if (interval >= 0.22 && interval <= 0.55) {
+          this.combo++;
+          if (this.combo > this.maxCombo) this.maxCombo = this.combo;
+          this.addScore(160 * Math.min(this.combo, 10));
+          this.showFeedback(`絶品あおり！ (${this.combo} COMBO)`, '#00e676');
+          this.dryness = Math.min(100, this.dryness + 4.8);
+        } else {
+          this.combo = 1;
+          this.addScore(100);
+          this.showFeedback('ナイスあおり！リズミカルに振れ！', '#ffca28');
+          this.dryness = Math.min(100, this.dryness + 2.8);
+        }
       } else {
-        this.combo = 0;
-        this.showFeedback('GOOD TOSS!', '#ffca28');
-        this.dryness = Math.min(100, this.dryness + 2.0);
+        this.combo = 1;
+        this.dryness = Math.min(100, this.dryness + 3.0);
       }
-    } else {
-      this.dryness = Math.min(100, this.dryness + 2.0);
+      this.lastTossTime = now;
     }
-    this.lastTossTime = now;
 
-    // 鑊気煽り判定
     if (this.wokHeiActive) {
       this.wokHeiTossCount++;
-      if (this.wokHeiTossCount <= 3) this.addScore(450);
+      if (this.wokHeiTossCount <= 4) {
+        this.addScore(450);
+        this.showFeedback(`鑊気コーティング！ (+450)`, '#ff7043');
+      }
     }
 
-    // 放熱（焦げリセット）
-    this.heat = Math.max(10, this.heat - 14 * power);
+    // 放熱（焦げ防止）
+    this.heat = Math.max(22, this.heat - 12 * power);
 
-    // 【プロの鍋煽り物理】：全剛体にリアルな放物線初速（ふわりと25cm舞い上がり鍋底へ戻る）を注入！
-    const liftVel = Math.min(2.8, Math.max(1.6, 2.0 * power));
-    const forwardVel = -0.65 * power; // 手前に引きつつ奥へ放る
+    // 卵プールをそぼろへほぐす
+    if (this.eggPool) {
+      this.eggPool.alpha = Math.max(0.15, this.eggPool.alpha - 0.22);
+    }
 
-    const applyTossToBodies = (bodies) => {
-      bodies.forEach((body) => {
-        if (!body.isEnabled()) return;
-        const currentVel = body.linvel();
-        const randX = (Math.random() - 0.5) * 0.35;
-        const randY = (Math.random() - 0.5) * 0.35;
-        const randZ = (Math.random() - 0.5) * 0.25;
+    // 全具材粒子に「奥の鍋肌を駆け上がって手前空中へ舞い上がり、鍋底中央へ戻る」放物線速度を付与！
+    const all = this.getAllParticles();
+    const liftBase = npClamp(1.85 * power, 1.35, 2.55);
 
-        // 質量に関係なく正確な速度を設定し、吹っ飛びを完全に防止
-        body.setLinvel({
-          x: (currentVel.x * 0.3) + randX,
-          y: liftVel + randY,
-          z: forwardVel + randZ
-        }, true);
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i];
+      // 現在の位置から中央〜やや手前へ返ってくる水平速度（吹っ飛びを100%防止しつつ豪快に舞う）
+      const targetX = (Math.random() - 0.5) * 0.42;
+      const targetY = (Math.random() - 0.5) * 0.42 + 0.08;
+      const flightTime = (2.0 * liftBase) / 9.8;
 
-        // 空中でパラパラと転がる微小な角速度
-        body.setAngvel({
-          x: (Math.random() - 0.5) * 4.0,
-          y: (Math.random() - 0.5) * 4.0,
-          z: (Math.random() - 0.5) * 4.0
-        }, true);
-      });
-    };
+      p.vx = ((targetX - p.x) / flightTime) + (Math.random() - 0.5) * 0.45;
+      p.vy = ((targetY - p.y) / flightTime) - 0.35 + (Math.random() - 0.5) * 0.45;
+      p.vz = liftBase * (0.78 + Math.random() * 0.42);
+      p.vrot = (Math.random() - 0.5) * 10.0;
 
-    applyTossToBodies(this.riceBodies);
-    if (this.eggSpawned) applyTossToBodies(this.eggBodies);
-    if (this.meatSpawned) applyTossToBodies(this.meatBodies);
-    if (this.onionSpawned) applyTossToBodies(this.onionBodies);
+      if (p.kind === 'rice') {
+        p.coat = Math.min(1.0, p.coat + 0.14 * power);
+        if (this.ingredients.soy) {
+          p.toast = Math.min(0.65, p.toast + 0.12);
+        }
+      }
+    }
+  }
 
-    // 鍋自体のわずかな跳ね上がりアニメーション
-    this.wokTiltX = -0.10 * power;
+  getAllParticles() {
+    return [
+      ...this.eggParticles,
+      ...this.riceParticles,
+      ...this.meatParticles,
+      ...this.onionParticles
+    ];
+  }
+
+  vibrate(pattern) {
+    try {
+      if (navigator.vibrate) navigator.vibrate(pattern);
+    } catch (_) {}
   }
 
   showFeedback(text, color = '#ffca28') {
     const el = document.getElementById('toss-feedback');
-    el.textContent = text;
-    el.style.color = color;
+    if (el) {
+      el.textContent = text;
+      el.style.color = color;
+    }
   }
 
   addScore(pts) {
     this.score = Math.max(0, this.score + pts);
-    document.getElementById('score-val').textContent = this.score;
+    const el = document.getElementById('score-val');
+    if (el) el.textContent = String(this.score);
   }
 
-  // --- アニメーション＆物理ループ ---
-  animate() {
-    requestAnimationFrame(() => this.animate());
+  // --- メイン物理＆調理更新ループ ---
+  animate(now) {
+    requestAnimationFrame((t) => this.animate(t));
 
-    const now = performance.now();
-    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05);
+    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.045);
     this.lastFrameTime = now;
 
-    // FPS計算
+    // FPS計測
     this.frameCount++;
     this.fpsTimer += dt;
     if (this.fpsTimer >= 0.5) {
-      document.getElementById('dbg-fps').textContent = Math.round(this.frameCount / this.fpsTimer);
+      const fpsEl = document.getElementById('dbg-fps');
+      if (fpsEl) fpsEl.textContent = String(Math.round(this.frameCount / this.fpsTimer));
       this.frameCount = 0;
       this.fpsTimer = 0;
     }
 
-    // 1. 調理ステート・熱伝導更新
+    this.updatePhysicsAndCooking(dt, now);
+    this.renderPhotorealScene(now);
+  }
+
+  updatePhysicsAndCooking(dt, now) {
+    // 1. 中華鍋自体のバネ・ダンパー運動更新（手首の自然な反動）
+    const springK = 28.0;
+    const damping = 7.5;
+    this.wokVx += (-springK * this.wokX - damping * this.wokVx) * dt;
+    this.wokVy += (-springK * this.wokY - damping * this.wokVy) * dt;
+    this.wokVz += (-springK * 1.4 * this.wokZ - damping * 1.2 * this.wokVz) * dt;
+
+    this.wokX = npClamp(this.wokX + this.wokVx * dt, -0.55, 0.55);
+    this.wokY = npClamp(this.wokY + this.wokVy * dt, -0.55, 0.55);
+    this.wokZ = npClamp(this.wokZ + this.wokVz * dt, 0.0, 0.95);
+
+    // 2. 調理タイマーと熱力学更新
     if (this.gameState === 'COOKING') {
-      this.updateCooking(dt);
-    }
+      this.timeRemaining -= dt;
+      if (this.timeRemaining <= 0) {
+        this.timeRemaining = 0;
+        this.finishGame();
+        return;
+      }
+      document.getElementById('time-val').textContent = String(Math.ceil(this.timeRemaining));
 
-    // 2. 中華鍋のキネマティック傾き更新
-    this.wokTiltX = THREE.MathUtils.lerp(this.wokTiltX, 0, dt * 5.0);
-    this.wokTiltZ = THREE.MathUtils.lerp(this.wokTiltZ, 0, dt * 5.0);
-    const wokQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.wokTiltX, 0, this.wokTiltZ));
-    this.wokMesh.quaternion.copy(wokQuat);
-    this.wokRigidBody.setNextKinematicRotation(wokQuat);
+      this.heat = Math.min(100, this.heat + 8.8 * dt);
+      if (this.heat > 86 && this.ingredients.rice) {
+        this.burnAmount += dt * 2.2;
+      }
 
-    // 3. Rapier 物理ワールドのステップ実行 (WASM)
-    this.world.step();
+      document.getElementById('meter-dryness').style.width = `${Math.min(100, this.dryness)}%`;
+      document.getElementById('val-dryness').textContent = `${Math.round(this.dryness)}%`;
+      document.getElementById('meter-heat').style.width = `${Math.min(100, this.heat)}%`;
+      document.getElementById('val-heat').textContent = `${Math.round(this.heat)}%`;
+      document.getElementById('combo-display').textContent = `COMBO ${this.combo}`;
 
-    // 4. 剛体の位置・回転を Three.js の InstancedMesh へ同期
-    this.syncPhysicsToVisuals();
-
-    // 5. 湯気パーティクルの更新
-    this.updateSmoke(dt);
-
-    // 6. レンダリング
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  updateCooking(dt) {
-    this.timeRemaining -= dt;
-    if (this.timeRemaining <= 0) {
-      this.timeRemaining = 0;
-      this.finishGame();
-      return;
-    }
-    document.getElementById('time-val').textContent = Math.ceil(this.timeRemaining);
-
-    // 強火バーナーによる熱量上昇
-    this.heat = Math.min(100, this.heat + 9.5 * dt);
-
-    if (this.heat > 84) {
-      this.burnAmount += dt * 3.5;
-    }
-
-    // UIメーター更新
-    document.getElementById('meter-dryness').style.width = `${Math.min(100, this.dryness)}%`;
-    document.getElementById('val-dryness').textContent = `${Math.round(this.dryness)}%`;
-    document.getElementById('meter-heat').style.width = `${Math.min(100, this.heat)}%`;
-    document.getElementById('val-heat').textContent = `${Math.round(this.heat)}%`;
-    document.getElementById('combo-display').textContent = `COMBO ${this.combo}`;
-
-    // 鍋肌ガイド
-    const rimEl = document.getElementById('rim-guide');
-    if (this.timeRemaining <= 12.0 && this.timeRemaining >= 4.0 && !this.ingredients.soy) {
-      rimEl.classList.add('active');
-    } else {
-      rimEl.classList.remove('active');
-    }
-  }
-
-  // 具材が鍋の外へ吹っ飛ぶのを防止し、鍋肌の内側へ滑らかに収束させるリミッター
-  clampToWok(body, pos) {
-    const distSq = pos.x * pos.x + pos.z * pos.z;
-    const maxR = this.wokRadius * 0.92;
-    if (distSq > maxR * maxR) {
-      const dist = Math.sqrt(distSq);
-      const nx = pos.x / dist;
-      const nz = pos.z / dist;
-      body.setTranslation({ x: nx * maxR * 0.90, y: Math.max(0.12, Math.min(pos.y, 0.7)), z: nz * maxR * 0.90 }, true);
-      const curVel = body.linvel();
-      body.setLinvel({ x: -curVel.x * 0.3 - nx * 0.5, y: Math.max(-0.2, curVel.y * 0.5), z: -curVel.z * 0.3 - nz * 0.5 }, true);
-    }
-    // 鍋の下や遥か上空に外れた場合の即時リスポーン
-    if (pos.y < -0.05 || pos.y > 2.2) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.35);
-      body.setTranslation({ x: Math.cos(angle) * r, y: 0.15 + Math.random() * 0.1, z: Math.sin(angle) * r }, true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.2, y: 0.1, z: (Math.random() - 0.5) * 0.2 }, true);
-    }
-  }
-
-  // --- 物理とビジュアルの同期＆動的メイラード反応 ---
-  syncPhysicsToVisuals() {
-    const dummy = new THREE.Object3D();
-    const tempColor = new THREE.Color();
-    let touchingCount = 0;
-
-    // 米粒の同期
-    if (this.ingredients.rice) {
-      const isEggCoated = this.ingredients.egg;
-      const isBurnt = this.burnAmount > 12;
-
-      for (let i = 0; i < this.riceCount; i++) {
-        const body = this.riceBodies[i];
-        if (!body.isEnabled()) continue;
-
-        const pos = body.translation();
-        this.clampToWok(body, pos);
-        const rot = body.rotation();
-
-        dummy.position.set(pos.x, pos.y, pos.z);
-        dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-        dummy.updateMatrix();
-        this.riceInstancedMesh.setMatrixAt(i, dummy.matrix);
-
-        // 鍋底接触判定（y < 0.18 かつ 水平移動中）
-        if (pos.y < 0.18) {
-          touchingCount++;
-          this.riceBurnTimers[i] += 0.02;
-
-          // 衝突音（速度に応じたサンプリング発音）
-          const vel = body.linvel();
-          const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-          if (speed > 1.2 && i % 18 === 0) {
-            this.audio.playCollision(speed);
-          }
-        }
-
-        // 動的な色の変化（実写テクスチャのツヤをそのまま美しく発色！黒く潰さない）
-        const burnTime = this.riceBurnTimers[i];
-        if (isBurnt && burnTime > 20.0) {
-          tempColor.setHex(0x8a4518); // 香ばしいキツネ色（黒焦げにはしない）
-        } else if (this.dryness > 55) {
-          tempColor.setHex(0xfffae6); // 黄金パラパラ光沢
-        } else if (isEggCoated) {
-          tempColor.setHex(0xfff4b8); // 卵イエローコーティング
+      const rimEl = document.getElementById('rim-guide');
+      if (rimEl) {
+        if (this.timeRemaining <= 16.0 && this.timeRemaining >= 3.0 && this.ingredients.rice && !this.ingredients.soy) {
+          rimEl.classList.add('active');
         } else {
-          tempColor.setHex(0xffffff); // 実写テクスチャそのままのツヤツヤ純白米！
+          rimEl.classList.remove('active');
+        }
+      }
+    } else if (this.gameState === 'LADLED') {
+      this.ladleCompleteTimer -= dt;
+      if (this.ladleCompleteTimer <= 0) {
+        this.triggerFlip();
+        return;
+      }
+    }
+
+    // 3. 液状〜半熟卵プールのアニメーション
+    if (this.eggPool) {
+      this.eggPool.radius += (this.eggPool.targetRadius - this.eggPool.radius) * Math.min(1, dt * 6.0);
+      this.eggPool.cookProgress = Math.min(1.0, this.eggPool.cookProgress + dt * 0.25);
+    }
+
+    // 4. 鍋肌醤油の泡アニメーション
+    for (let i = this.soyBubbles.length - 1; i >= 0; i--) {
+      this.soyBubbles[i].life -= dt * 0.45;
+      if (this.soyBubbles[i].life <= 0) this.soyBubbles.splice(i, 1);
+    }
+
+    // 5. 全具材粒子の3D放物面ボウル物理シミュレーション
+    const all = this.getAllParticles();
+    const gravity = 9.8;
+    const bowlCurvature = 0.42;
+    let landingCount = 0;
+
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i];
+
+      if (this.gameState === 'LADLED') {
+        // お玉の中央ドームへ綺麗に凝集
+        const targetR = 0.24;
+        const dist = Math.hypot(p.x, p.y);
+        if (dist > targetR) {
+          p.x *= (1 - dt * 6.0);
+          p.y *= (1 - dt * 6.0);
+        } else {
+          p.x += (0 - p.x) * dt * 2.5;
+          p.y += (0 - p.y) * dt * 2.5;
+        }
+        p.z = Math.max(0.05, (targetR * targetR - (p.x * p.x + p.y * p.y)) * 1.2);
+        p.vx = 0;
+        p.vy = 0;
+        p.vz = 0;
+        continue;
+      }
+
+      // 空中落下と水平移動
+      p.vz -= gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      p.rot += p.vrot * dt;
+
+      const rSq = p.x * p.x + p.y * p.y;
+      const bowlSurfaceZ = bowlCurvature * rSq;
+
+      // 鍋底・鍋肌との接触判定
+      if (p.z <= bowlSurfaceZ) {
+        if (p.vz < -1.1) {
+          landingCount++;
+        }
+        p.z = bowlSurfaceZ;
+        p.vz = Math.abs(p.vz) * 0.16;
+
+        // 放物面の傾斜による中心への復元力 ＋ スマホの傾き(tiltX, tiltY)による滑り力
+        const slopeForce = 2.6;
+        p.vx += (-p.x * slopeForce + this.tiltX * 2.2 - this.wokVx * 0.35) * dt;
+        p.vy += (-p.y * slopeForce + this.tiltY * 2.2 - this.wokVy * 0.35) * dt;
+
+        // 適度な油の摩擦減衰
+        const dampingFactor = Math.pow(0.18, dt);
+        p.vx *= dampingFactor;
+        p.vy *= dampingFactor;
+        p.vrot *= dampingFactor;
+
+        // 鍋底での加熱による黄金メイラード進行（黒焦げにはしない）
+        if (p.kind === 'rice' && this.heat > 85) {
+          p.toast = Math.min(1.0, p.toast + dt * 0.025);
+        }
+      }
+
+      // 鍋の縁（半径 0.72）から外へ飛び出さない絶対クランプ（吹っ飛び防止）
+      const dist = Math.sqrt(rSq);
+      const maxR = 0.68;
+      if (dist > maxR) {
+        const nx = p.x / dist;
+        const ny = p.y / dist;
+        p.x = nx * maxR * 0.96;
+        p.y = ny * maxR * 0.96;
+        const dot = p.vx * nx + p.vy * ny;
+        if (dot > 0) {
+          p.vx -= 1.5 * dot * nx;
+          p.vy -= 1.5 * dot * ny;
+        }
+        // 縁に当たった勢いで少し浮き上がって中央へ返る（本物の中華鍋の返し形状）
+        p.vz = Math.max(p.vz, 0.35);
+      }
+    }
+
+    if (landingCount > 0 && Math.random() < 0.45) {
+      this.audio.playCollision(Math.min(4.5, 1.2 + landingCount * 0.15));
+    }
+
+    const wokSpeed = Math.hypot(this.wokVx, this.wokVy, this.wokVz);
+    this.audio.updateSizzle(this.heat, all.length, wokSpeed);
+
+    // 6. 湯気・煙パーティクルの更新
+    for (let i = this.steamParticles.length - 1; i >= 0; i--) {
+      const s = this.steamParticles[i];
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.z += s.vz * dt;
+      if (s.temp) {
+        s.alpha -= dt * 0.22;
+        if (s.alpha <= 0) {
+          this.steamParticles.splice(i, 1);
+        }
+      } else if (s.z > 1.5) {
+        s.x = (Math.random() - 0.5) * 0.85;
+        s.y = (Math.random() - 0.5) * 0.85;
+        s.z = 0.05;
+      }
+    }
+  }
+
+  // --- フォトリアル・マルチレイヤー描画パイプライン ---
+  renderPhotorealScene(now) {
+    const ctx = this.ctx;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const dpr = this.dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    const cx = this.wokCenterX;
+    const cy = this.wokCenterY;
+    const R = this.wokRadiusPx;
+
+    // 背景クリア（重厚な業務用厨房の暗色ステンレス調）
+    ctx.fillStyle = '#0d0e12';
+    ctx.fillRect(0, 0, this.viewW, this.viewH);
+
+    // 画像描画スケール: wok_empty_fpv.jpg (1024x1024) における鍋半径は 370px
+    const imgSize = (R / 370) * 1024;
+    const imgLeft = cx - (511 / 1024) * imgSize;
+    const imgTop = cy - (458 / 1024) * imgSize;
+
+    // =========================================================================
+    // LAYER 1: 固定された業務用ガスコンロ・五徳・強火ブルー＆オレンジ炎レイヤー
+    // =========================================================================
+    const bgSource = this.sprites.stoveBg || this.textures.wokEmpty;
+    if (bgSource) {
+      ctx.drawImage(bgSource, imgLeft, imgTop, imgSize, imgSize);
+    } else {
+      // フォールバック五徳描画
+      const bgGrad = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.5);
+      bgGrad.addColorStop(0, '#1a2436');
+      bgGrad.addColorStop(0.7, '#14161d');
+      bgGrad.addColorStop(1, '#090a0d');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
+
+    // 強火ガスバーナーの動的揺らぎ発光エフェクト（熱量に応じて炎が脈動）
+    const flamePulse = 0.75 + 0.25 * Math.sin(now * 0.024) * Math.cos(now * 0.017);
+    const heatRatio = this.heat / 100;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const flameGrad = ctx.createRadialGradient(cx, cy, R * 0.82, cx, cy, R * 1.22);
+    flameGrad.addColorStop(0, `rgba(0, 170, 255, ${0.32 * flamePulse})`);
+    flameGrad.addColorStop(0.55, `rgba(255, 110, 20, ${0.38 * heatRatio * flamePulse})`);
+    flameGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = flameGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 1.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // =========================================================================
+    // LAYER 2: スマホの動きに1:1で連動して動く「実写打ち出し中華鍋＋木柄」レイヤー
+    // =========================================================================
+    const wokShiftX = (this.wokX * 0.42 + this.tiltX * 0.22) * R;
+    const wokShiftY = (this.wokY * 0.42 + this.tiltY * 0.22) * R;
+    const wokScale = 1.0 + this.wokZ * 0.14;
+
+    ctx.save();
+    ctx.translate(cx + wokShiftX, cy + wokShiftY);
+    ctx.scale(wokScale, wokScale);
+
+    // 鍋が動いた際にコンロ上に落ちるリアルなドロップシャドウ
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.beginPath();
+    ctx.arc(-wokShiftX * 0.35, 10 + this.wokZ * 18, R * 1.01, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    if (this.sprites.wokCutout) {
+      const cutLeft = -(511 / 1024) * imgSize;
+      const cutTop = -(458 / 1024) * imgSize;
+      ctx.drawImage(this.sprites.wokCutout, cutLeft, cutTop, imgSize, imgSize);
+    } else {
+      // テクスチャロード完了前の高精細鉄鍋フォールバック
+      const wokGrad = ctx.createRadialGradient(-R * 0.2, -R * 0.2, R * 0.1, 0, 0, R);
+      wokGrad.addColorStop(0, '#2c2926');
+      wokGrad.addColorStop(0.55, '#1c1b1a');
+      wokGrad.addColorStop(0.92, '#111112');
+      wokGrad.addColorStop(1, '#555558');
+      ctx.fillStyle = wokGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 鍋底の熱せられた油溜まり（スマホの傾きに応じてオイルのハイライトがヌルッと移動！）
+    const oilOffsetX = this.tiltX * R * 0.28;
+    const oilOffsetY = this.tiltY * R * 0.28;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const oilGrad = ctx.createRadialGradient(
+      oilOffsetX - R * 0.12,
+      oilOffsetY - R * 0.12,
+      R * 0.04,
+      oilOffsetX,
+      oilOffsetY,
+      R * 0.48
+    );
+    oilGrad.addColorStop(0, 'rgba(255, 245, 210, 0.22)');
+    oilGrad.addColorStop(0.45, 'rgba(255, 190, 90, 0.08)');
+    oilGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = oilGrad;
+    ctx.beginPath();
+    ctx.arc(oilOffsetX, oilOffsetY, R * 0.48, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // =========================================================================
+    // LAYER 3: 鍋底の溶き卵ジュワッ演出 ＆ 鍋肌焦がし醤油リング
+    // =========================================================================
+    if (this.eggPool && this.eggPool.alpha > 0.02) {
+      ctx.save();
+      ctx.globalAlpha = this.eggPool.alpha;
+      const pr = this.eggPool.radius * R;
+
+      // 白身のレース状の縁
+      const eggEdgeGrad = ctx.createRadialGradient(0, 0, pr * 0.2, 0, 0, pr * 1.08);
+      eggEdgeGrad.addColorStop(0, '#ffd54f');
+      eggEdgeGrad.addColorStop(0.65, '#ffca28');
+      eggEdgeGrad.addColorStop(0.88, '#fffde7');
+      eggEdgeGrad.addColorStop(1, 'rgba(255, 253, 231, 0)');
+      ctx.fillStyle = eggEdgeGrad;
+      ctx.beginPath();
+      ctx.arc(oilOffsetX * 0.4, oilOffsetY * 0.4, pr * 1.08, 0, Math.PI * 2);
+      ctx.fill();
+
+      // ジュワジュワ膨らむ半熟気泡
+      this.eggPool.bubbles.forEach((b) => {
+        const bx = oilOffsetX * 0.4 + Math.cos(b.angle) * (b.dist * pr);
+        const by = oilOffsetY * 0.4 + Math.sin(b.angle) * (b.dist * pr);
+        const br = b.r * R * (0.85 + 0.25 * Math.sin(now * 0.015 + b.phase));
+        ctx.fillStyle = 'rgba(255, 248, 200, 0.75)';
+        ctx.beginPath();
+        ctx.arc(bx, by, br, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    // 鍋肌醤油の香ばしいキャラメル沸騰泡
+    if (this.soyBubbles.length > 0) {
+      ctx.save();
+      this.soyBubbles.forEach((sb) => {
+        ctx.fillStyle = `rgba(165, 75, 20, ${sb.life * 0.75})`;
+        ctx.beginPath();
+        ctx.arc(sb.x * R, sb.y * R, sb.r * (1.2 - sb.life * 0.3), 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(255, 195, 110, ${sb.life * 0.65})`;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    // =========================================================================
+    // LAYER 4: 3Dソートされた実写具材パーティクル（米650粒・卵56個・肉28個・ネギ38個）
+    // =========================================================================
+    const all = this.getAllParticles();
+    if (all.length > 0) {
+      // 低い粒子から高い粒子（空中を舞う粒子）の順にZソートして立体的な重なりを表現
+      all.sort((a, b) => a.z - b.z);
+
+      // 4-A. 鍋肌に落ちるソフトドロップシャドウを一括描画
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      for (let i = 0; i < all.length; i += 2) {
+        const p = all[i];
+        const airHeight = Math.max(0, p.z - 0.38 * (p.x * p.x + p.y * p.y));
+        const sx = p.x * R + airHeight * 14;
+        const sy = p.y * R + airHeight * 22 + 3;
+        const sr = (p.kind === 'rice' ? 4.5 : 9.5) * p.scale;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // 4-B. 実写切り抜きスプライトの3D遠近投影描画
+      for (let i = 0; i < all.length; i++) {
+        const p = all[i];
+        const airHeight = Math.max(0, p.z - 0.38 * (p.x * p.x + p.y * p.y));
+        // 空中に舞い上がった具材ほどカメラに近づき大きく見える3D透視投影
+        const perspective = 1.0 + airHeight * 0.52;
+        const px = p.x * R;
+        const py = p.y * R - airHeight * 38;
+        const sc = p.scale * perspective * (R / 175);
+
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(p.rot);
+        ctx.scale(sc, sc);
+
+        if (p.kind === 'rice') {
+          let spriteList = this.sprites.riceWhite;
+          if (p.toast > 0.65) {
+            spriteList = this.sprites.riceToasted;
+          } else if (p.coat > 0.65 || this.dryness > 50) {
+            spriteList = this.sprites.riceGolden;
+          } else if (p.coat > 0.18 || this.ingredients.egg) {
+            spriteList = this.sprites.riceEgg;
+          }
+          const sp = spriteList[p.variant % spriteList.length];
+          if (sp) ctx.drawImage(sp, -14, -9);
+        } else if (p.kind === 'egg') {
+          const sp = this.sprites.eggCurds[p.variant % this.sprites.eggCurds.length];
+          if (sp) ctx.drawImage(sp, -32, -32);
+        } else if (p.kind === 'meat') {
+          const sp = this.sprites.meatCubes[p.variant % this.sprites.meatCubes.length];
+          if (sp) ctx.drawImage(sp, -26, -26);
+        } else if (p.kind === 'onion') {
+          const sp = this.sprites.onionRings[p.variant % this.sprites.onionRings.length];
+          if (sp) ctx.drawImage(sp, -20, -20);
         }
 
-        this.riceInstancedMesh.setColorAt(i, tempColor);
+        ctx.restore();
       }
-      this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
-      if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
     }
 
-    // 卵の同期 (ふんわり半熟そぼろ)
-    if (this.eggSpawned) {
-      for (let i = 0; i < this.eggCount; i++) {
-        const body = this.eggBodies[i];
-        if (!body.isEnabled()) continue;
-        const pos = body.translation();
-        this.clampToWok(body, pos);
-        const rot = body.rotation();
-        dummy.position.set(pos.x, pos.y, pos.z);
-        dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-        dummy.updateMatrix();
-        this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
-      }
-      this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
+    // お玉まとめ時のステンレス中華お玉ドーム演出
+    if (this.gameState === 'LADLED') {
+      ctx.save();
+      const ladleR = R * 0.32;
+      const ladleGrad = ctx.createRadialGradient(-ladleR * 0.3, -ladleR * 0.3, ladleR * 0.1, 0, 0, ladleR);
+      ladleGrad.addColorStop(0, 'rgba(240, 245, 255, 0.55)');
+      ladleGrad.addColorStop(0.6, 'rgba(160, 175, 190, 0.35)');
+      ladleGrad.addColorStop(1, 'rgba(70, 80, 95, 0.75)');
+      ctx.fillStyle = ladleGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, ladleR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
     }
 
-    // チャーシューの同期
-    if (this.meatSpawned) {
-      for (let i = 0; i < this.meatCount; i++) {
-        const body = this.meatBodies[i];
-        if (!body.isEnabled()) continue;
-        const pos = body.translation();
-        this.clampToWok(body, pos);
-        const rot = body.rotation();
-        dummy.position.set(pos.x, pos.y, pos.z);
-        dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-        dummy.updateMatrix();
-        this.meatInstancedMesh.setMatrixAt(i, dummy.matrix);
-      }
-      this.meatInstancedMesh.instanceMatrix.needsUpdate = true;
-    }
+    // =========================================================================
+    // LAYER 5: 立ち上る湯気・鑊気（ウォックヘイ）のリアル白煙エフェクト
+    // =========================================================================
+    ctx.save();
+    for (let i = 0; i < this.steamParticles.length; i++) {
+      const s = this.steamParticles[i];
+      const sx = s.x * R;
+      const sy = s.y * R - s.z * 42;
+      const sr = s.size * (0.8 + s.z * 0.7) * (R / 180);
+      const fade = Math.sin(npClamp(s.z / 1.5, 0, 1) * Math.PI);
+      const alpha = s.alpha * fade;
+      if (alpha <= 0.01) continue;
 
-    // ネギの同期
-    if (this.onionSpawned) {
-      for (let i = 0; i < this.onionCount; i++) {
-        const body = this.onionBodies[i];
-        if (!body.isEnabled()) continue;
-        const pos = body.translation();
-        this.clampToWok(body, pos);
-        const rot = body.rotation();
-        dummy.position.set(pos.x, pos.y, pos.z);
-        dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-        dummy.updateMatrix();
-        this.onionInstancedMesh.setMatrixAt(i, dummy.matrix);
-      }
-      this.onionInstancedMesh.instanceMatrix.needsUpdate = true;
+      const sGrad = ctx.createRadialGradient(sx, sy, 2, sx, sy, sr);
+      sGrad.addColorStop(0, `rgba(255, 252, 245, ${alpha})`);
+      sGrad.addColorStop(0.5, `rgba(235, 240, 248, ${alpha * 0.45})`);
+      sGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = sGrad;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
     }
+    ctx.restore();
 
-    // シズル音の更新
-    this.audio.updateSizzle(this.heat, touchingCount);
+    ctx.restore(); // LAYER 2 (Wok Transform) 終了
+    ctx.restore(); // DPR Scale 終了
   }
 
-  updateSmoke(dt) {
-    if (!this.smokeSystem) return;
-    const positions = this.smokeSystem.geometry.attributes.position.array;
-
-    for (let i = 0; i < this.smokeParticles.length; i++) {
-      const p = this.smokeParticles[i];
-      p.y += p.vy * dt;
-      if (p.y > 1.8) {
-        p.y = 0.1;
-        p.x = (Math.random() - 0.5) * 0.9;
-        p.z = (Math.random() - 0.5) * 0.9;
-      }
-      positions[i * 3 + 0] = p.x;
-      positions[i * 3 + 1] = p.y;
-      positions[i * 3 + 2] = p.z;
-    }
-    this.smokeSystem.geometry.attributes.position.needsUpdate = true;
-
-    // 焦げが多いときは煙を黒く
-    if (this.burnAmount > 10) {
-      this.smokeSystem.material.color.setHex(0x333333);
-    } else {
-      this.smokeSystem.material.color.setHex(0xffffff);
-    }
-  }
-
-  // --- ゲーム終了・スコア判定 ---
+  // --- ゲーム終了・スコア審査 ---
   finishGame() {
     this.gameState = 'RESULT';
     this.audio.isCooking = false;
-    if (this.audio.sizzleGain) this.audio.sizzleGain.gain.value = 0;
-
-    // 1. パラパラ度スコア (25点)
-    const drynessScore = Math.round(Math.min(25, (this.dryness / 100) * 25));
-
-    // 2. 焼き加減スコア (20点)
-    let heatScore = 20;
-    if (this.burnAmount > 4) {
-      heatScore = Math.max(0, 20 - Math.round(this.burnAmount * 1.5));
+    if (this.audio.sizzleGain && this.audio.ctx) {
+      this.audio.sizzleGain.gain.setTargetAtTime(0, this.audio.ctx.currentTime, 0.05);
     }
 
-    // 3. 卵・米コーティング (15点)
+    const drynessScore = Math.round(Math.min(25, (this.dryness / 100) * 25));
+
+    let heatScore = 20;
+    if (this.burnAmount > 6) {
+      heatScore = Math.max(5, 20 - Math.round((this.burnAmount - 6) * 1.2));
+    }
+
     let coatingScore = 15;
     if (!this.ingredients.egg || !this.ingredients.rice) {
       coatingScore = 0;
     } else {
       const diff = this.timings.rice - this.timings.egg;
-      if (diff < 1.0 || diff > 3.8) coatingScore = 7;
+      if (diff < 0.6 || diff > 5.0) coatingScore = 9;
     }
 
-    // 4. 具材＆ネギ鮮度 (15点)
     let timingScore = 15;
-    if (!this.ingredients.greenonion) timingScore -= 8;
-    if (!this.ingredients.meat) timingScore -= 7;
+    if (!this.ingredients.greenonion) timingScore -= 7;
+    if (!this.ingredients.meat) timingScore -= 6;
 
-    // 5. 鑊気スコア (15点)
     let wokheiScore = 0;
     if (this.ingredients.soy) {
-      wokheiScore = Math.min(15, 6 + this.wokHeiTossCount * 3);
+      wokheiScore = Math.min(15, 7 + this.wokHeiTossCount * 3);
     }
 
-    // 6. 盛り付けスコア (10点)
-    const platingScore = this.ingredients.ladled ? 10 : 3;
-
+    const platingScore = this.ingredients.ladled ? 10 : 4;
     const totalScore = Math.min(100, drynessScore + heatScore + coatingScore + timingScore + wokheiScore + platingScore);
 
-    // リザルトUI反映
     document.getElementById('score-dryness').textContent = `${drynessScore} / 25`;
     document.getElementById('score-heat').textContent = `${heatScore} / 20`;
     document.getElementById('score-coating').textContent = `${coatingScore} / 15`;
@@ -1423,26 +1810,22 @@ class GokuChahan3D {
     document.getElementById('score-plating').textContent = `${platingScore} / 10`;
     document.getElementById('result-score').textContent = `${totalScore} / 100`;
 
-    let rank = 'D';
-    let title = 'まかない落第';
-    let comment = '「ベチャベチャ（または丸焦げ）だ！修業し直してこい！」';
+    let rank = 'C';
+    let title = '見習いコック';
+    let comment = '「まずは卵・ご飯・焼豚・ネギ・鍋肌醤油をテンポよく入れて鍋を振るんじゃ！」';
 
-    if (totalScore >= 92) {
+    if (totalScore >= 90) {
       rank = 'S';
       title = '町中華の生ける伝説';
-      comment = '「完璧だ…！米一粒一粒に卵が宿り、鑊気が突き抜ける至高の一皿！」';
-    } else if (totalScore >= 78) {
+      comment = '「完璧だ…！米一粒一粒に黄金の卵が宿り、鑊気が突き抜ける至高の一皿！」';
+    } else if (totalScore >= 75) {
       rank = 'A';
       title = '一流中華の料理長';
-      comment = '「見事なパラパラ感と香ばしさ！ネギのシャキシャキ感も最高だ。」';
-    } else if (totalScore >= 60) {
+      comment = '「見事なパラパラ感と香ばしさ！鍋振りの手首の返しも板についておる！」';
+    } else if (totalScore >= 58) {
       rank = 'B';
       title = '一人前の料理人';
-      comment = '「うん、うまい！次は鍋肌醤油のタイミングをもっと極めてみよう。」';
-    } else if (totalScore >= 45) {
-      rank = 'C';
-      title = '見習いコック';
-      comment = '「少し油っこいか…？具材を入れる順番と秒数を意識するんじゃ。」';
+      comment = '「うまい！次は鍋肌醤油のあとに素早く鍋をあおって香りを閉じ込めよう。」';
     }
 
     document.getElementById('result-rank').textContent = rank;
@@ -1453,7 +1836,15 @@ class GokuChahan3D {
   }
 }
 
-// 起動
-window.addEventListener('DOMContentLoaded', () => {
-  new GokuChahan3D();
-});
+function npClamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+// --- 確実な起動（DOMContentLoadedの発火前後どちらでも100%即座に起動） ---
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', () => {
+    window.__chahanGame = new GokuChahanPhotoreal();
+  });
+} else {
+  window.__chahanGame = new GokuChahanPhotoreal();
+}
