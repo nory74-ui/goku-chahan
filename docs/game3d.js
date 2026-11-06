@@ -361,9 +361,14 @@ class GokuChahan3D {
     wokGeom.setIndex(indices);
     wokGeom.computeVertexNormals();
 
-    // 黒光りする鋳鉄PBRマテリアル
+    const texLoader = new THREE.TextureLoader();
+    const wokTex = texLoader.load('textures/wok_diffuse.jpg');
+    wokTex.wrapS = THREE.RepeatWrapping;
+    wokTex.wrapT = THREE.RepeatWrapping;
+
+    // 黒光りする鋳鉄PBRマテリアル (実写シーズニングテクスチャ適用)
     const wokMat = new THREE.MeshStandardMaterial({
-      color: 0x14151a,
+      map: wokTex,
       roughness: 0.28,
       metalness: 0.88,
       side: THREE.DoubleSide
@@ -401,14 +406,19 @@ class GokuChahan3D {
 
   // --- 米粒 ＆ 具材の剛体初期化 ---
   buildRiceAndIngredients() {
+    const texLoader = new THREE.TextureLoader();
+    const riceTex = texLoader.load('textures/rice_diffuse.jpg');
+    const meatTex = texLoader.load('textures/meat_diffuse.jpg');
+    const onionTex = texLoader.load('textures/onion_diffuse.jpg');
+
     // 1. 米粒 InstancedMesh (240粒)
     const riceGeom = new THREE.SphereGeometry(0.045, 8, 8);
     riceGeom.scale(1.0, 0.75, 1.35); // 米粒の細長い形状
 
     const riceMat = new THREE.MeshStandardMaterial({
-      color: 0xf5f5ea,
-      roughness: 0.35,
-      metalness: 0.04
+      map: riceTex,
+      roughness: 0.32,
+      metalness: 0.08
     });
 
     this.riceInstancedMesh = new THREE.InstancedMesh(riceGeom, riceMat, this.riceCount);
@@ -418,7 +428,7 @@ class GokuChahan3D {
     this.scene.add(this.riceInstancedMesh);
 
     const dummy = new THREE.Object3D();
-    const defaultColor = new THREE.Color(0xf5f5ea);
+    const defaultColor = new THREE.Color(0xffffff);
 
     for (let i = 0; i < this.riceCount; i++) {
       // 鍋の底周辺にランダム配置
@@ -457,7 +467,7 @@ class GokuChahan3D {
     // 2. チャーシュー InstancedMesh (20個)
     const meatGeom = new THREE.BoxGeometry(0.09, 0.09, 0.09);
     const meatMat = new THREE.MeshStandardMaterial({
-      color: 0x8d281e,
+      map: meatTex,
       roughness: 0.45,
       metalness: 0.05
     });
@@ -480,7 +490,7 @@ class GokuChahan3D {
     // 3. 長ネギ InstancedMesh (25個)
     const onionGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.05, 10);
     const onionMat = new THREE.MeshStandardMaterial({
-      color: 0x38b000,
+      map: onionTex,
       roughness: 0.5,
       metalness: 0.0
     });

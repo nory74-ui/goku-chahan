@@ -27,6 +27,12 @@ namespace ChahanGame.Editor
 
             // 1. テクスチャのロード
             Texture2D normalMap = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/wok_hammer_normal.png");
+            Texture2D wokTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/wok_diffuse.jpg");
+            Texture2D riceTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/rice_diffuse.jpg");
+            Texture2D meatTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/meat_diffuse.jpg");
+            Texture2D onionTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/onion_diffuse.jpg");
+            Texture2D eggTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Textures/egg_diffuse.jpg");
+
             if (normalMap != null)
             {
                 TextureImporter importer = AssetImporter.GetAtPath("Assets/Textures/wok_hammer_normal.png") as TextureImporter;
@@ -44,46 +50,51 @@ namespace ChahanGame.Editor
             Mesh onionFbxMesh = LoadMeshFromFbx("Assets/Models/real_onion.fbx");
             Mesh eggFbxMesh = LoadMeshFromFbx("Assets/Models/real_egg.fbx");
 
-            // 3. マテリアル設定
-            // ① 米粒 (Photoreal SSS + Oil Clearcoat)
+            // 3. マテリアル設定 (実写PBRフォトリアルテクスチャを全適用)
+            // ① 米粒 (Photoreal SSS + Oil Clearcoat + 実写テクスチャ)
             Shader riceShader = Shader.Find("Custom/PhotorealRice");
             if (riceShader == null) riceShader = Shader.Find("Standard");
             Material riceMat = new Material(riceShader);
+            if (riceTex != null) riceMat.mainTexture = riceTex;
             riceMat.enableInstancing = true;
             AssetDatabase.CreateAsset(riceMat, "Assets/Materials/RiceInstancedMaterial.mat");
 
-            // ② 中華鍋 (黒光りPBR ＋ 打出しハンマー痕ノーマルマップ)
+            // ② 中華鍋 (実写黒光り油膜PBR ＋ 打出しハンマー痕ノーマルマップ)
             Material wokMat = new Material(Shader.Find("Standard"));
-            wokMat.color = new Color(0.08f, 0.09f, 0.11f);
-            wokMat.SetFloat("_Metallic", 0.90f);
-            wokMat.SetFloat("_Glossiness", 0.78f);
+            if (wokTex != null) wokMat.mainTexture = wokTex;
+            wokMat.color = Color.white;
+            wokMat.SetFloat("_Metallic", 0.88f);
+            wokMat.SetFloat("_Glossiness", 0.82f);
             if (normalMap != null)
             {
                 wokMat.SetTexture("_BumpMap", normalMap);
-                wokMat.SetFloat("_BumpScale", 0.75f);
+                wokMat.SetFloat("_BumpScale", 0.6f);
                 wokMat.EnableKeyword("_NORMALMAP");
             }
             AssetDatabase.CreateAsset(wokMat, "Assets/Materials/WokIronMaterial.mat");
 
-            // ③ チャーシュー (タレ照り ＋ 赤身)
+            // ③ チャーシュー (実写タレ照り ＋ 赤身繊維PBR)
             Material meatMat = new Material(Shader.Find("Standard"));
-            meatMat.color = new Color(0.68f, 0.18f, 0.12f);
-            meatMat.SetFloat("_Glossiness", 0.55f);
-            meatMat.SetFloat("_Metallic", 0.05f);
+            if (meatTex != null) meatMat.mainTexture = meatTex;
+            meatMat.color = Color.white;
+            meatMat.SetFloat("_Glossiness", 0.62f);
+            meatMat.SetFloat("_Metallic", 0.08f);
             meatMat.enableInstancing = true;
             AssetDatabase.CreateAsset(meatMat, "Assets/Materials/MeatMaterial.mat");
 
-            // ④ 長ネギ (水分にじむグリーン)
+            // ④ 長ネギ (実写中空リング ＋ 水分にじむ断面PBR)
             Material onionMat = new Material(Shader.Find("Standard"));
-            onionMat.color = new Color(0.22f, 0.76f, 0.26f);
-            onionMat.SetFloat("_Glossiness", 0.60f);
+            if (onionTex != null) onionMat.mainTexture = onionTex;
+            onionMat.color = Color.white;
+            onionMat.SetFloat("_Glossiness", 0.65f);
             onionMat.enableInstancing = true;
             AssetDatabase.CreateAsset(onionMat, "Assets/Materials/OnionMaterial.mat");
 
-            // ⑤ 炒り卵 (ふんわり半熟イエロー)
+            // ⑤ 炒り卵 (実写ふんわり半熟イエローPBR)
             Material eggMat = new Material(Shader.Find("Standard"));
-            eggMat.color = new Color(1.0f, 0.85f, 0.32f);
-            eggMat.SetFloat("_Glossiness", 0.45f);
+            if (eggTex != null) eggMat.mainTexture = eggTex;
+            eggMat.color = Color.white;
+            eggMat.SetFloat("_Glossiness", 0.52f);
             eggMat.enableInstancing = true;
             AssetDatabase.CreateAsset(eggMat, "Assets/Materials/EggMaterial.mat");
 
