@@ -316,7 +316,7 @@ class GokuChahan3D {
     this.scene.add(this.stoveLight);
   }
 
-  // スマホ・タブレット縦画面で中華鍋全体が収まり、下部ボタンと重ならないカメラ調整
+  // スマホ・タブレット縦画面およびPC横画面で、中華鍋全体が美しく収まり下部ボタンと一切重ならないカメラ調整
   setupCameraForAspect() {
     if (!this.camera) return;
     const aspect = window.innerWidth / window.innerHeight;
@@ -327,13 +327,14 @@ class GokuChahan3D {
       // 横幅に合わせてFOVを拡張し、注視点を奥にシフトして下部ボタンエリアと中華鍋を完全分離
       const targetFov = 50 / aspect * 0.56;
       this.camera.fov = Math.min(68, Math.max(48, targetFov));
-      this.camera.position.set(0, 4.6, 1.9);
-      this.camera.lookAt(0, 0.2, 0.40);
+      this.camera.position.set(0, 4.8, 2.0);
+      this.camera.lookAt(0, 0.2, 0.45);
     } else {
-      // PC・横画面
-      this.camera.fov = 48;
-      this.camera.position.set(0, 3.4, 2.3);
-      this.camera.lookAt(0, 0.2, 0);
+      // PC・横画面 (16:9, 16:10, 4:3)
+      // 中華鍋全体（手前ハンドル含む）を画面上部〜中央に配置し、下部操作ボタンと絶対に重ならないアングル
+      this.camera.fov = 42;
+      this.camera.position.set(0, 4.8, 2.7);
+      this.camera.lookAt(0, 0.2, 0.70);
     }
     this.camera.updateProjectionMatrix();
   }
@@ -907,20 +908,30 @@ class GokuChahan3D {
     // 放熱（焦げリセット）
     this.heat = Math.max(10, this.heat - 14 * power);
 
-    // 【物理の極意】：全剛体に「上斜め前方（手前に引きつつ奥へ放るベクトル）」のインパルスを注入！
-    const liftForce = 0.22 * power;
-    const forwardForce = -0.06 * power; // 手前へ引き込む
+    // 【プロの鍋煽り物理】：全剛体にリアルな放物線初速（ふわりと25cm舞い上がり鍋底へ戻る）を注入！
+    const liftVel = Math.min(2.8, Math.max(1.6, 2.0 * power));
+    const forwardVel = -0.65 * power; // 手前に引きつつ奥へ放る
 
     const applyTossToBodies = (bodies) => {
       bodies.forEach((body) => {
         if (!body.isEnabled()) return;
         const currentVel = body.linvel();
-        const randX = (Math.random() - 0.5) * 0.04;
-        const randY = (Math.random() - 0.5) * 0.04;
-        body.applyImpulse({
-          x: randX,
-          y: liftForce + randY,
-          z: forwardForce + (Math.random() - 0.5) * 0.03
+        const randX = (Math.random() - 0.5) * 0.35;
+        const randY = (Math.random() - 0.5) * 0.35;
+        const randZ = (Math.random() - 0.5) * 0.25;
+
+        // 質量に関係なく正確な速度を設定し、吹っ飛びを完全に防止
+        body.setLinvel({
+          x: (currentVel.x * 0.3) + randX,
+          y: liftVel + randY,
+          z: forwardVel + randZ
+        }, true);
+
+        // 空中でパラパラと転がる微小な角速度
+        body.setAngvel({
+          x: (Math.random() - 0.5) * 4.0,
+          y: (Math.random() - 0.5) * 4.0,
+          z: (Math.random() - 0.5) * 4.0
         }, true);
       });
     };
@@ -930,7 +941,7 @@ class GokuChahan3D {
     if (this.onionSpawned) applyTossToBodies(this.onionBodies);
 
     // 鍋自体のわずかな跳ね上がりアニメーション
-    this.wokTiltX = -0.12 * power;
+    this.wokTiltX = -0.10 * power;
   }
 
   showFeedback(text, color = '#ffca28') {
@@ -1018,6 +1029,27 @@ class GokuChahan3D {
     }
   }
 
+  // 具材が鍋の外へ吹っ飛ぶのを防止し、鍋肌の内側へ滑らかに収束させるリミッター
+  clampToWok(body, pos) {
+    const distSq = pos.x * pos.x + pos.z * pos.z;
+    const maxR = this.wokRadius * 0.92;
+    if (distSq > maxR * maxR) {
+      const dist = Math.sqrt(distSq);
+      const nx = pos.x / dist;
+      const nz = pos.z / dist;
+      body.setTranslation({ x: nx * maxR * 0.90, y: Math.max(0.12, Math.min(pos.y, 0.7)), z: nz * maxR * 0.90 }, true);
+      const curVel = body.linvel();
+      body.setLinvel({ x: -curVel.x * 0.3 - nx * 0.5, y: Math.max(-0.2, curVel.y * 0.5), z: -curVel.z * 0.3 - nz * 0.5 }, true);
+    }
+    // 鍋の下や遥か上空に外れた場合の即時リスポーン
+    if (pos.y < -0.05 || pos.y > 2.2) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * (this.wokRadius * 0.35);
+      body.setTranslation({ x: Math.cos(angle) * r, y: 0.15 + Math.random() * 0.1, z: Math.sin(angle) * r }, true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.2, y: 0.1, z: (Math.random() - 0.5) * 0.2 }, true);
+    }
+  }
+
   // --- 物理とビジュアルの同期＆動的メイラード反応 ---
   syncPhysicsToVisuals() {
     const dummy = new THREE.Object3D();
@@ -1034,6 +1066,7 @@ class GokuChahan3D {
         if (!body.isEnabled()) continue;
 
         const pos = body.translation();
+        this.clampToWok(body, pos);
         const rot = body.rotation();
 
         dummy.position.set(pos.x, pos.y, pos.z);
@@ -1078,6 +1111,7 @@ class GokuChahan3D {
         const body = this.meatBodies[i];
         if (!body.isEnabled()) continue;
         const pos = body.translation();
+        this.clampToWok(body, pos);
         const rot = body.rotation();
         dummy.position.set(pos.x, pos.y, pos.z);
         dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
@@ -1093,6 +1127,7 @@ class GokuChahan3D {
         const body = this.onionBodies[i];
         if (!body.isEnabled()) continue;
         const pos = body.translation();
+        this.clampToWok(body, pos);
         const rot = body.rotation();
         dummy.position.set(pos.x, pos.y, pos.z);
         dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);

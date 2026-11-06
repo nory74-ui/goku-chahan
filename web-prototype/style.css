@@ -245,6 +245,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+}
+
+/* PC・横画面対応: 中央下にコンパクトに集約し、中華鍋と絶対に重ならないレイアウト */
+@media (min-width: 768px) and (min-aspect-ratio: 1/1) {
+  #action-palette {
+    max-width: 540px;
+    margin: 0 auto;
+    border-radius: 18px 18px 0 0;
+    border-left: 1px solid rgba(255, 202, 40, 0.2);
+    border-right: 1px solid rgba(255, 202, 40, 0.2);
+    padding: 10px 16px 14px;
+    gap: 6px;
+  }
+
+  .ingredient-btn, .action-btn {
+    padding: 8px 4px;
+  }
+
+  .ingredient-btn .icon, .action-btn .icon {
+    font-size: 20px;
+  }
+
+  .ingredient-btn .name, .action-btn .name {
+    font-size: 11px;
+  }
 }
 
 .palette-row {
