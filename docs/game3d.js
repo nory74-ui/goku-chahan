@@ -274,6 +274,9 @@ class GokuChahan3D {
 
     // 7. レンダリングループ開始
     this.animate();
+
+    // 8. 開いた瞬間から超リアル中華鍋＆チャーハン炒めを開始
+    this.startGame();
   }
 
   setupThreeScene() {
@@ -575,19 +578,31 @@ class GokuChahan3D {
       this.setupCameraForAspect();
     });
 
-    // スタートボタン
-    document.getElementById('btn-start').addEventListener('click', () => {
-      this.audio.init();
-      this.requestDevicePermissions().then(() => {
-        this.startGame();
+    // センサー許可ボタン
+    const sensorBtn = document.getElementById('btn-enable-sensor');
+    if (sensorBtn) {
+      sensorBtn.addEventListener('click', () => {
+        this.audio.init();
+        this.requestDevicePermissions().then(() => {
+          const banner = document.getElementById('sensor-banner');
+          if (banner) banner.classList.add('hidden');
+        });
       });
-    });
+    }
+
+    // 初回ユーザーインタラクションでの音声アクティベート
+    window.addEventListener('pointerdown', () => {
+      this.audio.init();
+    }, { once: true });
 
     // リトライ
-    document.getElementById('btn-retry').addEventListener('click', () => {
-      this.resetGame();
-      this.startGame();
-    });
+    const retryBtn = document.getElementById('btn-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        this.resetGame();
+        this.startGame();
+      });
+    }
 
     // 具材ボタン
     document.getElementById('btn-egg').addEventListener('click', () => this.addIngredient('egg'));
@@ -686,26 +701,31 @@ class GokuChahan3D {
   startGame() {
     this.gameState = 'COOKING';
     this.audio.isCooking = true;
-    document.getElementById('start-screen').classList.remove('active');
-    document.getElementById('result-screen').classList.remove('active');
+    const startScreen = document.getElementById('start-screen');
+    if (startScreen) startScreen.classList.remove('active');
+    const resultScreen = document.getElementById('result-screen');
+    if (resultScreen) resultScreen.classList.remove('active');
 
     this.timeRemaining = 45.0;
     this.score = 0;
     this.combo = 0;
-    this.dryness = 0;
-    this.heat = 35;
+    this.dryness = 25;
+    this.heat = 45;
     this.burnAmount = 0;
     this.wokHeiActive = false;
     this.wokHeiTossCount = 0;
 
-    document.getElementById('btn-egg').disabled = false;
-    document.getElementById('btn-rice').disabled = true;
-    document.getElementById('btn-meat').disabled = true;
-    document.getElementById('btn-greenonion').disabled = true;
-    document.getElementById('btn-soy').disabled = true;
-    document.getElementById('btn-ladle').disabled = true;
+    // 開いた瞬間から米粒・チャーシュー・ネギが中華鍋で香ばしく炒められている状態で開始
+    this.riceInstancedMesh.visible = true;
+    this.riceBodies.forEach((body) => {
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.4, y: 0.2 + Math.random() * 0.6, z: (Math.random() - 0.5) * 0.4 }, true);
+    });
 
-    this.showFeedback('熱々の油に卵を投入せよ！', '#ffca28');
+    this.spawnMeat();
+    this.spawnOnion();
+
+    this.showFeedback('🔥 手首のスナップで手前に引いて煽れ！', '#ffca28');
   }
 
   resetGame() {

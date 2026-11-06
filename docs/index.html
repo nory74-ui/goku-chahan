@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>極・炒飯道 3D - 物理演算リアル中華鍋シミュレーター</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261106_3">
 
   <!-- ES Modules Import Map: Three.js & Rapier.js (WASM物理エンジン) -->
   <script type="importmap">
@@ -23,27 +23,10 @@
     <canvas id="three-canvas"></canvas>
   </div>
 
-  <!-- スタート画面（センサー許可ダイアログ・説明） -->
-  <div id="start-screen" class="overlay-screen active">
-    <div class="card">
-      <div class="tech-badge">Three.js × Rapier 3D 物理演算</div>
-      <h1 class="game-title">極・炒飯道 3D</h1>
-      <p class="subtitle">〜 米粒の滑りと熱伝導を極める本格中華鍋 〜</p>
-
-      <div class="instructions">
-        <h3>【職人の心得】</h3>
-        <ul>
-          <li>📱 画面を<strong>天井（上向き）</strong>にして構えます。</li>
-          <li>🔥 手首のスナップで<strong>手前に引いて跳ね上げる</strong>と、米粒が鍋肌を駆け上がって宙を舞います！</li>
-          <li>🍳 卵 ➔ ご飯 ➔ 肉 ➔ ネギ ➔ 鍋肌醤油 の黄金順で投入。</li>
-          <li>🥄 最後に<strong>お玉に集めて、端末をパカッと反転</strong>してお皿へ盛り付け！</li>
-          <li>💻 PC操作：<strong>[Space]</strong> で鍋煽り、<strong>[矢印キー]</strong> で鍋を傾ける、<strong>[F]</strong> で皿盛り。</li>
-        </ul>
-      </div>
-
-      <button id="btn-start" class="btn-main">厨房に入る（物理＆音響開始）</button>
-      <div id="sensor-status" class="status-text">※ iOS端末はタップ後にモーションセンサーを「許可」してください</div>
-    </div>
+  <!-- iOSセンサー有効化バナー (邪魔にならないスマートバー) -->
+  <div id="sensor-banner" class="sensor-banner">
+    <span>📱 端末を振って煽る: <b id="sensor-status">タップしてセンサーを許可</b></span>
+    <button id="btn-enable-sensor" class="btn-sensor-ok">許可</button>
   </div>
 
   <!-- ゲームプレイ中 UI (HUD) -->
@@ -99,27 +82,27 @@
           <span class="icon">🥚</span>
           <span class="name">溶き卵</span>
         </button>
-        <button id="btn-rice" class="ingredient-btn" data-type="rice" disabled>
+        <button id="btn-rice" class="ingredient-btn" data-type="rice">
           <span class="icon">🍚</span>
           <span class="name">ご飯</span>
         </button>
-        <button id="btn-meat" class="ingredient-btn" data-type="meat" disabled>
+        <button id="btn-meat" class="ingredient-btn" data-type="meat">
           <span class="icon">🥩</span>
           <span class="name">チャーシュー</span>
         </button>
-        <button id="btn-greenonion" class="ingredient-btn" data-type="greenonion" disabled>
+        <button id="btn-greenonion" class="ingredient-btn" data-type="greenonion">
           <span class="icon">🌱</span>
           <span class="name">長ネギ</span>
         </button>
       </div>
       <div class="palette-row second">
-        <button id="btn-soy" class="action-btn soy-btn" disabled>
+        <button id="btn-soy" class="action-btn soy-btn">
           <span class="icon">🍶</span>
           <span class="name">鍋肌醤油</span>
         </button>
-        <button id="btn-ladle" class="action-btn ladle-btn" disabled>
+        <button id="btn-ladle" class="action-btn ladle-btn">
           <span class="icon">🥄</span>
-          <span class="name">お玉まとめ</span>
+          <span class="name">お玉まとめ / 皿盛り</span>
         </button>
       </div>
     </footer>
@@ -182,6 +165,6 @@
   </div>
 
   <!-- メイン3Dゲームスクリプト -->
-  <script type="module" src="game3d.js"></script>
+  <script type="module" src="game3d.js?v=20261106_3"></script>
 </body>
 </html>

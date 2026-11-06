@@ -274,6 +274,9 @@ class GokuChahan3D {
 
     // 7. レンダリングループ開始
     this.animate();
+
+    // 8. 開いた瞬間から超リアル中華鍋＆チャーハン炒めを開始
+    this.startGame();
   }
 
   setupThreeScene() {
@@ -282,9 +285,7 @@ class GokuChahan3D {
 
     const aspect = window.innerWidth / window.innerHeight;
     this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 50);
-    // 真上から斜め45度で見下ろすクォータービュー
-    this.camera.position.set(0, 3.4, 2.3);
-    this.camera.lookAt(0, 0.2, 0);
+    this.setupCameraForAspect();
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -313,6 +314,28 @@ class GokuChahan3D {
     this.stoveLight = new THREE.PointLight(0xff3d00, 1.2, 4.0);
     this.stoveLight.position.set(0, 0.05, 0);
     this.scene.add(this.stoveLight);
+  }
+
+  // スマホ・タブレット縦画面で中華鍋全体が収まり、下部ボタンと重ならないカメラ調整
+  setupCameraForAspect() {
+    if (!this.camera) return;
+    const aspect = window.innerWidth / window.innerHeight;
+    this.camera.aspect = aspect;
+
+    if (aspect < 1.0) {
+      // スマホ・タブレット縦画面 (9:16 〜 3:4)
+      // 横幅に合わせてFOVを拡張し、注視点を奥にシフトして下部ボタンエリアと中華鍋を完全分離
+      const targetFov = 50 / aspect * 0.56;
+      this.camera.fov = Math.min(68, Math.max(48, targetFov));
+      this.camera.position.set(0, 4.6, 1.9);
+      this.camera.lookAt(0, 0.2, 0.40);
+    } else {
+      // PC・横画面
+      this.camera.fov = 48;
+      this.camera.position.set(0, 3.4, 2.3);
+      this.camera.lookAt(0, 0.2, 0);
+    }
+    this.camera.updateProjectionMatrix();
   }
 
   // --- 中華鍋の放物面メッシュ ＆ Trimesh コライダー構築 ---
@@ -361,9 +384,14 @@ class GokuChahan3D {
     wokGeom.setIndex(indices);
     wokGeom.computeVertexNormals();
 
-    // 黒光りする鋳鉄PBRマテリアル
+    const texLoader = new THREE.TextureLoader();
+    const wokTex = texLoader.load('textures/wok_diffuse.jpg');
+    wokTex.wrapS = THREE.RepeatWrapping;
+    wokTex.wrapT = THREE.RepeatWrapping;
+
+    // 黒光りする鋳鉄PBRマテリアル (実写シーズニングテクスチャ適用)
     const wokMat = new THREE.MeshStandardMaterial({
-      color: 0x14151a,
+      map: wokTex,
       roughness: 0.28,
       metalness: 0.88,
       side: THREE.DoubleSide
@@ -401,14 +429,19 @@ class GokuChahan3D {
 
   // --- 米粒 ＆ 具材の剛体初期化 ---
   buildRiceAndIngredients() {
+    const texLoader = new THREE.TextureLoader();
+    const riceTex = texLoader.load('textures/rice_diffuse.jpg');
+    const meatTex = texLoader.load('textures/meat_diffuse.jpg');
+    const onionTex = texLoader.load('textures/onion_diffuse.jpg');
+
     // 1. 米粒 InstancedMesh (240粒)
     const riceGeom = new THREE.SphereGeometry(0.045, 8, 8);
     riceGeom.scale(1.0, 0.75, 1.35); // 米粒の細長い形状
 
     const riceMat = new THREE.MeshStandardMaterial({
-      color: 0xf5f5ea,
-      roughness: 0.35,
-      metalness: 0.04
+      map: riceTex,
+      roughness: 0.32,
+      metalness: 0.08
     });
 
     this.riceInstancedMesh = new THREE.InstancedMesh(riceGeom, riceMat, this.riceCount);
@@ -418,7 +451,7 @@ class GokuChahan3D {
     this.scene.add(this.riceInstancedMesh);
 
     const dummy = new THREE.Object3D();
-    const defaultColor = new THREE.Color(0xf5f5ea);
+    const defaultColor = new THREE.Color(0xffffff);
 
     for (let i = 0; i < this.riceCount; i++) {
       // 鍋の底周辺にランダム配置
@@ -457,7 +490,7 @@ class GokuChahan3D {
     // 2. チャーシュー InstancedMesh (20個)
     const meatGeom = new THREE.BoxGeometry(0.09, 0.09, 0.09);
     const meatMat = new THREE.MeshStandardMaterial({
-      color: 0x8d281e,
+      map: meatTex,
       roughness: 0.45,
       metalness: 0.05
     });
@@ -480,7 +513,7 @@ class GokuChahan3D {
     // 3. 長ネギ InstancedMesh (25個)
     const onionGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.05, 10);
     const onionMat = new THREE.MeshStandardMaterial({
-      color: 0x38b000,
+      map: onionTex,
       roughness: 0.5,
       metalness: 0.0
     });
@@ -541,24 +574,35 @@ class GokuChahan3D {
   // --- 入力イベント（センサー ＆ キーボード） ---
   bindEvents() {
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.setupCameraForAspect();
     });
 
-    // スタートボタン
-    document.getElementById('btn-start').addEventListener('click', () => {
-      this.audio.init();
-      this.requestDevicePermissions().then(() => {
-        this.startGame();
+    // センサー許可ボタン
+    const sensorBtn = document.getElementById('btn-enable-sensor');
+    if (sensorBtn) {
+      sensorBtn.addEventListener('click', () => {
+        this.audio.init();
+        this.requestDevicePermissions().then(() => {
+          const banner = document.getElementById('sensor-banner');
+          if (banner) banner.classList.add('hidden');
+        });
       });
-    });
+    }
+
+    // 初回ユーザーインタラクションでの音声アクティベート
+    window.addEventListener('pointerdown', () => {
+      this.audio.init();
+    }, { once: true });
 
     // リトライ
-    document.getElementById('btn-retry').addEventListener('click', () => {
-      this.resetGame();
-      this.startGame();
-    });
+    const retryBtn = document.getElementById('btn-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        this.resetGame();
+        this.startGame();
+      });
+    }
 
     // 具材ボタン
     document.getElementById('btn-egg').addEventListener('click', () => this.addIngredient('egg'));
@@ -657,26 +701,31 @@ class GokuChahan3D {
   startGame() {
     this.gameState = 'COOKING';
     this.audio.isCooking = true;
-    document.getElementById('start-screen').classList.remove('active');
-    document.getElementById('result-screen').classList.remove('active');
+    const startScreen = document.getElementById('start-screen');
+    if (startScreen) startScreen.classList.remove('active');
+    const resultScreen = document.getElementById('result-screen');
+    if (resultScreen) resultScreen.classList.remove('active');
 
     this.timeRemaining = 45.0;
     this.score = 0;
     this.combo = 0;
-    this.dryness = 0;
-    this.heat = 35;
+    this.dryness = 25;
+    this.heat = 45;
     this.burnAmount = 0;
     this.wokHeiActive = false;
     this.wokHeiTossCount = 0;
 
-    document.getElementById('btn-egg').disabled = false;
-    document.getElementById('btn-rice').disabled = true;
-    document.getElementById('btn-meat').disabled = true;
-    document.getElementById('btn-greenonion').disabled = true;
-    document.getElementById('btn-soy').disabled = true;
-    document.getElementById('btn-ladle').disabled = true;
+    // 開いた瞬間から米粒・チャーシュー・ネギが中華鍋で香ばしく炒められている状態で開始
+    this.riceInstancedMesh.visible = true;
+    this.riceBodies.forEach((body) => {
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.4, y: 0.2 + Math.random() * 0.6, z: (Math.random() - 0.5) * 0.4 }, true);
+    });
 
-    this.showFeedback('熱々の油に卵を投入せよ！', '#ffca28');
+    this.spawnMeat();
+    this.spawnOnion();
+
+    this.showFeedback('🔥 手首のスナップで手前に引いて煽れ！', '#ffca28');
   }
 
   resetGame() {
