@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: RiceInstancedMaterial
-  m_Shader: {fileID: 4800000, guid: 0ad229ac495a24663819b68466a93125, type: 3}
+  m_Shader: {fileID: 4800000, guid: 685a5a149e5454cc9acd675580cae092, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -25,11 +25,16 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _Glossiness: 0.6
+    - _OilFresnel: 3
+    - _OilSmoothness: 0.88
+    - _SSSPower: 4
+    - _SSSScale: 0.65
     m_Colors:
-    - _ColorBurnt: {r: 0.32, g: 0.18, b: 0.12, a: 1}
-    - _ColorEgg: {r: 1, g: 0.92, b: 0.45, a: 1}
-    - _ColorGolden: {r: 1, g: 0.78, b: 0.15, a: 1}
-    - _ColorRaw: {r: 0.98, g: 0.98, b: 0.92, a: 1}
+    - _ColorBrown: {r: 0.75, g: 0.42, b: 0.14, a: 1}
+    - _ColorBurnt: {r: 0.18, g: 0.08, b: 0.04, a: 1}
+    - _ColorEgg: {r: 1, g: 0.88, b: 0.38, a: 1}
+    - _ColorGolden: {r: 1, g: 0.74, b: 0.12, a: 1}
+    - _ColorRaw: {r: 0.97, g: 0.96, b: 0.91, a: 1}
+    - _SSSColor: {r: 1, g: 0.95, b: 0.8, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
