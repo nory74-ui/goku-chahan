@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>極・炒飯道 - 炎の中華鍋アクション</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- スタート画面（センサー許可・説明） -->
+  <div id="start-screen" class="overlay-screen active">
+    <div class="card">
+      <div class="title-badge">スマホ体感型 中華鍋アクション</div>
+      <h1 class="game-title">極・炒飯道</h1>
+      <p class="subtitle">〜 職人の鍋振りと火力を極めろ 〜</p>
+
+      <div class="instructions">
+        <h3>【遊び方】</h3>
+        <ul>
+          <li>📱 画面を<strong>天井（上向き）</strong>にして持ちます。</li>
+          <li>🔥 手首をスナップさせて<strong>手前にクイッとあおる</strong>と中華鍋が振られます！</li>
+          <li>⏱ 卵 ➔ ご飯 ➔ 具材 ➔ ネギ ➔ 鍋肌醤油 の順に投入！</li>
+          <li>🍚 最後に<strong>お玉にまとめて、端末をパカッとひっくり返す</strong>とお皿に盛り付け！</li>
+        </ul>
+      </div>
+
+      <button id="btn-start" class="btn-main">厨房に入る（センサー開始）</button>
+      <div id="sensor-status" class="status-text">※ iOSはタップ後にセンサー許可を「許可」してください</div>
+    </div>
+  </div>
+
+  <!-- ゲームメイン画面 -->
+  <div id="game-container">
+    <!-- 上部ステータスバー -->
+    <header id="status-bar">
+      <div class="status-item">
+        <span class="label">TIME</span>
+        <span id="time-val" class="value">45</span>
+      </div>
+      <div class="status-item center">
+        <div id="combo-display" class="combo-text">COMBO 0</div>
+        <div id="toss-feedback" class="feedback-text">READY</div>
+      </div>
+      <div class="status-item">
+        <span class="label">SCORE</span>
+        <span id="score-val" class="value">0</span>
+      </div>
+    </header>
+
+    <!-- メーターエリア（パラパラ度・熱量） -->
+    <div id="meters-container">
+      <div class="meter-wrapper">
+        <span class="meter-label">パラパラ度</span>
+        <div class="meter-bar-bg">
+          <div id="meter-dryness" class="meter-bar-fill dry"></div>
+        </div>
+      </div>
+      <div class="meter-wrapper">
+        <span class="meter-label">熱量 / コゲ</span>
+        <div class="meter-bar-bg">
+          <div id="meter-heat" class="meter-bar-fill heat"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 中華鍋ビュー（Canvas） -->
+    <div id="wok-view">
+      <canvas id="wok-canvas"></canvas>
+      <!-- 鍋肌ハイライト（醤油投入用） -->
+      <div id="wok-rim-overlay" class="wok-rim"></div>
+      <!-- 鑊気（ウォックヘイ）発動エフェクト用 -->
+      <div id="wok-hei-banner" class="wok-hei-effect">鑊気 (WOK HEI) 発動!!</div>
+    </div>
+
+    <!-- 下部：具材・アクションパレット -->
+    <footer id="action-palette">
+      <div class="palette-row">
+        <button id="btn-egg" class="ingredient-btn" data-type="egg">
+          <span class="icon">🥚</span>
+          <span class="name">溶き卵</span>
+        </button>
+        <button id="btn-rice" class="ingredient-btn" data-type="rice" disabled>
+          <span class="icon">🍚</span>
+          <span class="name">ご飯</span>
+        </button>
+        <button id="btn-meat" class="ingredient-btn" data-type="meat" disabled>
+          <span class="icon">🥩</span>
+          <span class="name">チャーシュー</span>
+        </button>
+        <button id="btn-greenonion" class="ingredient-btn" data-type="greenonion" disabled>
+          <span class="icon">🌱</span>
+          <span class="name">長ネギ</span>
+        </button>
+      </div>
+      <div class="palette-row second">
+        <button id="btn-soy" class="action-btn soy-btn" disabled>
+          <span class="icon">🍶</span>
+          <span class="name">鍋肌醤油</span>
+        </button>
+        <button id="btn-ladle" class="action-btn ladle-btn" disabled>
+          <span class="icon">🥄</span>
+          <span class="name">お玉まとめ</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- デバッグ用センサーモニター（PCテスト・調整用） -->
+    <div id="debug-panel">
+      <span>Accel Y: <b id="dbg-ay">0</b></span> |
+      <span>Accel Z: <b id="dbg-az">0</b></span> |
+      <span>Pitch: <b id="dbg-pitch">0</b></span> |
+      <button id="btn-debug-toss">鍋あおり(Space)</button>
+      <button id="btn-debug-flip">ひっくり返し(F)</button>
+    </div>
+  </div>
+
+  <!-- リザルト画面 -->
+  <div id="result-screen" class="overlay-screen">
+    <div class="card result-card">
+      <div class="result-header">
+        <div id="result-rank" class="rank-badge">S</div>
+        <h2 id="result-title" class="result-title">町中華の生ける伝説</h2>
+      </div>
+
+      <div class="plate-preview">
+        <canvas id="plate-canvas" width="220" height="220"></canvas>
+      </div>
+
+      <div class="score-display">
+        <div class="total-score-label">出来栄えスコア</div>
+        <div id="result-score" class="total-score-val">96 / 100</div>
+      </div>
+
+      <!-- 評価ブレイクダウン -->
+      <div class="breakdown-list">
+        <div class="breakdown-item">
+          <span>パラパラ度（リズム煽り）:</span>
+          <b id="score-dryness">25 / 25</b>
+        </div>
+        <div class="breakdown-item">
+          <span>焼き加減（香ばしさ）:</span>
+          <b id="score-heat">20 / 20</b>
+        </div>
+        <div class="breakdown-item">
+          <span>卵・米のコーティング:</span>
+          <b id="score-coating">15 / 15</b>
+        </div>
+        <div class="breakdown-item">
+          <span>具材＆ネギの鮮度:</span>
+          <b id="score-timing">15 / 15</b>
+        </div>
+        <div class="breakdown-item">
+          <span>鑊気（鍋肌醤油）:</span>
+          <b id="score-wokhei">15 / 15</b>
+        </div>
+        <div class="breakdown-item">
+          <span>盛り付け（ドーム成形）:</span>
+          <b id="score-plating">10 / 10</b>
+        </div>
+      </div>
+
+      <p id="chef-comment" class="chef-comment">「文句なしの絶品！米の一粒一粒が黄金に輝いておる！」</p>
+
+      <button id="btn-retry" class="btn-main">もう一丁作る！</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

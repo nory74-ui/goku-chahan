@@ -3,34 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>極・炒飯道 - 炎の中華鍋アクション</title>
+  <title>極・炒飯道 3D - 物理演算リアル中華鍋シミュレーター</title>
   <link rel="stylesheet" href="style.css">
+
+  <!-- ES Modules Import Map: Three.js & Rapier.js (WASM物理エンジン) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.13.0/rapier.es.min.js"
+    }
+  }
+  </script>
 </head>
 <body>
-  <!-- スタート画面（センサー許可・説明） -->
+  <!-- Three.js 3D Viewport -->
+  <div id="canvas-container">
+    <canvas id="three-canvas"></canvas>
+  </div>
+
+  <!-- スタート画面（センサー許可ダイアログ・説明） -->
   <div id="start-screen" class="overlay-screen active">
     <div class="card">
-      <div class="title-badge">スマホ体感型 中華鍋アクション</div>
-      <h1 class="game-title">極・炒飯道</h1>
-      <p class="subtitle">〜 職人の鍋振りと火力を極めろ 〜</p>
+      <div class="tech-badge">Three.js × Rapier 3D 物理演算</div>
+      <h1 class="game-title">極・炒飯道 3D</h1>
+      <p class="subtitle">〜 米粒の滑りと熱伝導を極める本格中華鍋 〜</p>
 
       <div class="instructions">
-        <h3>【遊び方】</h3>
+        <h3>【職人の心得】</h3>
         <ul>
-          <li>📱 画面を<strong>天井（上向き）</strong>にして持ちます。</li>
-          <li>🔥 手首をスナップさせて<strong>手前にクイッとあおる</strong>と中華鍋が振られます！</li>
-          <li>⏱ 卵 ➔ ご飯 ➔ 具材 ➔ ネギ ➔ 鍋肌醤油 の順に投入！</li>
-          <li>🍚 最後に<strong>お玉にまとめて、端末をパカッとひっくり返す</strong>とお皿に盛り付け！</li>
+          <li>📱 画面を<strong>天井（上向き）</strong>にして構えます。</li>
+          <li>🔥 手首のスナップで<strong>手前に引いて跳ね上げる</strong>と、米粒が鍋肌を駆け上がって宙を舞います！</li>
+          <li>🍳 卵 ➔ ご飯 ➔ 肉 ➔ ネギ ➔ 鍋肌醤油 の黄金順で投入。</li>
+          <li>🥄 最後に<strong>お玉に集めて、端末をパカッと反転</strong>してお皿へ盛り付け！</li>
+          <li>💻 PC操作：<strong>[Space]</strong> で鍋煽り、<strong>[矢印キー]</strong> で鍋を傾ける、<strong>[F]</strong> で皿盛り。</li>
         </ul>
       </div>
 
-      <button id="btn-start" class="btn-main">厨房に入る（センサー開始）</button>
-      <div id="sensor-status" class="status-text">※ iOSはタップ後にセンサー許可を「許可」してください</div>
+      <button id="btn-start" class="btn-main">厨房に入る（物理＆音響開始）</button>
+      <div id="sensor-status" class="status-text">※ iOS端末はタップ後にモーションセンサーを「許可」してください</div>
     </div>
   </div>
 
-  <!-- ゲームメイン画面 -->
-  <div id="game-container">
+  <!-- ゲームプレイ中 UI (HUD) -->
+  <div id="hud-container">
     <!-- 上部ステータスバー -->
     <header id="status-bar">
       <div class="status-item">
@@ -50,27 +67,30 @@
     <!-- メーターエリア（パラパラ度・熱量） -->
     <div id="meters-container">
       <div class="meter-wrapper">
-        <span class="meter-label">パラパラ度</span>
+        <div class="meter-header">
+          <span class="meter-label">パラパラ度 (水分蒸発)</span>
+          <span id="val-dryness" class="meter-num">0%</span>
+        </div>
         <div class="meter-bar-bg">
           <div id="meter-dryness" class="meter-bar-fill dry"></div>
         </div>
       </div>
       <div class="meter-wrapper">
-        <span class="meter-label">熱量 / コゲ</span>
+        <div class="meter-header">
+          <span class="meter-label">鍋底熱量 (メイラード / コゲ)</span>
+          <span id="val-heat" class="meter-num">30%</span>
+        </div>
         <div class="meter-bar-bg">
           <div id="meter-heat" class="meter-bar-fill heat"></div>
         </div>
       </div>
     </div>
 
-    <!-- 中華鍋ビュー（Canvas） -->
-    <div id="wok-view">
-      <canvas id="wok-canvas"></canvas>
-      <!-- 鍋肌ハイライト（醤油投入用） -->
-      <div id="wok-rim-overlay" class="wok-rim"></div>
-      <!-- 鑊気（ウォックヘイ）発動エフェクト用 -->
-      <div id="wok-hei-banner" class="wok-hei-effect">鑊気 (WOK HEI) 発動!!</div>
-    </div>
+    <!-- 鑊気（ウォックヘイ）覚醒バナー -->
+    <div id="wok-hei-banner" class="wok-hei-banner">鑊気 (WOK HEI) 覚醒!!</div>
+
+    <!-- 画面中央ガイド（鍋肌ゾーンのハイライト） -->
+    <div id="rim-guide" class="rim-guide"></div>
 
     <!-- 下部：具材・アクションパレット -->
     <footer id="action-palette">
@@ -104,13 +124,13 @@
       </div>
     </footer>
 
-    <!-- デバッグ用センサーモニター（PCテスト・調整用） -->
+    <!-- PC/デバッグパネル -->
     <div id="debug-panel">
-      <span>Accel Y: <b id="dbg-ay">0</b></span> |
-      <span>Accel Z: <b id="dbg-az">0</b></span> |
-      <span>Pitch: <b id="dbg-pitch">0</b></span> |
-      <button id="btn-debug-toss">鍋あおり(Space)</button>
-      <button id="btn-debug-flip">ひっくり返し(F)</button>
+      <span>FPS: <b id="dbg-fps">60</b></span> |
+      <span>米粒: <b id="dbg-count">250</b></span> |
+      <span>Y:<b id="dbg-ay">0.0</b></span> <span>Z:<b id="dbg-az">0.0</b></span> |
+      <button id="btn-debug-toss">煽る(Space)</button>
+      <button id="btn-debug-flip">盛る(F)</button>
     </div>
   </div>
 
@@ -120,10 +140,6 @@
       <div class="result-header">
         <div id="result-rank" class="rank-badge">S</div>
         <h2 id="result-title" class="result-title">町中華の生ける伝説</h2>
-      </div>
-
-      <div class="plate-preview">
-        <canvas id="plate-canvas" width="220" height="220"></canvas>
       </div>
 
       <div class="score-display">
@@ -138,7 +154,7 @@
           <b id="score-dryness">25 / 25</b>
         </div>
         <div class="breakdown-item">
-          <span>焼き加減（香ばしさ）:</span>
+          <span>焼き加減（メイラード香）:</span>
           <b id="score-heat">20 / 20</b>
         </div>
         <div class="breakdown-item">
@@ -150,7 +166,7 @@
           <b id="score-timing">15 / 15</b>
         </div>
         <div class="breakdown-item">
-          <span>鑊気（鍋肌醤油）:</span>
+          <span>鑊気（鍋肌醤油と煙）:</span>
           <b id="score-wokhei">15 / 15</b>
         </div>
         <div class="breakdown-item">
@@ -159,12 +175,13 @@
         </div>
       </div>
 
-      <p id="chef-comment" class="chef-comment">「文句なしの絶品！米の一粒一粒が黄金に輝いておる！」</p>
+      <p id="chef-comment" class="chef-comment">「文句なしの絶品！米の一粒一粒が油をまとい、黄金に輝いておる！」</p>
 
       <button id="btn-retry" class="btn-main">もう一丁作る！</button>
     </div>
   </div>
 
-  <script src="game.js"></script>
+  <!-- メイン3Dゲームスクリプト -->
+  <script type="module" src="game3d.js"></script>
 </body>
 </html>
