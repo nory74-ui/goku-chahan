@@ -282,9 +282,7 @@ class GokuChahan3D {
 
     const aspect = window.innerWidth / window.innerHeight;
     this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 50);
-    // 真上から斜め45度で見下ろすクォータービュー
-    this.camera.position.set(0, 3.4, 2.3);
-    this.camera.lookAt(0, 0.2, 0);
+    this.setupCameraForAspect();
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -313,6 +311,28 @@ class GokuChahan3D {
     this.stoveLight = new THREE.PointLight(0xff3d00, 1.2, 4.0);
     this.stoveLight.position.set(0, 0.05, 0);
     this.scene.add(this.stoveLight);
+  }
+
+  // スマホ・タブレット縦画面で中華鍋全体が収まり、下部ボタンと重ならないカメラ調整
+  setupCameraForAspect() {
+    if (!this.camera) return;
+    const aspect = window.innerWidth / window.innerHeight;
+    this.camera.aspect = aspect;
+
+    if (aspect < 1.0) {
+      // スマホ・タブレット縦画面 (9:16 〜 3:4)
+      // 横幅に合わせてFOVを拡張し、注視点を奥にシフトして下部ボタンエリアと中華鍋を完全分離
+      const targetFov = 50 / aspect * 0.56;
+      this.camera.fov = Math.min(68, Math.max(48, targetFov));
+      this.camera.position.set(0, 4.6, 1.9);
+      this.camera.lookAt(0, 0.2, 0.40);
+    } else {
+      // PC・横画面
+      this.camera.fov = 48;
+      this.camera.position.set(0, 3.4, 2.3);
+      this.camera.lookAt(0, 0.2, 0);
+    }
+    this.camera.updateProjectionMatrix();
   }
 
   // --- 中華鍋の放物面メッシュ ＆ Trimesh コライダー構築 ---
@@ -551,9 +571,8 @@ class GokuChahan3D {
   // --- 入力イベント（センサー ＆ キーボード） ---
   bindEvents() {
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.setupCameraForAspect();
     });
 
     // スタートボタン

@@ -111,15 +111,15 @@ namespace ChahanGame.Editor
             // 5. 新規シーン構築
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-            // カメラ配置 (至近距離マクロ視点)
+            // カメラ配置 (スマホ・タブレット縦画面で中華鍋全体が収まり、下部ボタンと重ならないアングル)
             GameObject camObj = new GameObject("Main Camera");
             camObj.tag = "MainCamera";
             Camera cam = camObj.AddComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0.05f, 0.05f, 0.07f);
-            cam.fieldOfView = 48f;
-            camObj.transform.position = new Vector3(0f, 3.1f, -1.7f);
-            camObj.transform.rotation = Quaternion.Euler(61f, 0f, 0f);
+            cam.backgroundColor = new Color(0.04f, 0.05f, 0.07f);
+            cam.fieldOfView = 50f;
+            camObj.transform.position = new Vector3(0f, 5.0f, -1.8f);
+            camObj.transform.rotation = Quaternion.Euler(66f, 0f, 0f);
             camObj.AddComponent<AudioListener>();
 
             // ライティング構築 (厨房の映画調ライティング)
@@ -163,13 +163,14 @@ namespace ChahanGame.Editor
             probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
             probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.OnAwake;
 
-            // 6. 中華鍋の配置 (Blender製FBXモデル)
+            // 6. 中華鍋の配置 (Blender製FBXモデル: ハンドルを手前に向けるためY軸180度回転)
             GameObject wokObj = new GameObject("RealChahanWok");
             var wokFilter = wokObj.AddComponent<MeshFilter>();
             wokFilter.sharedMesh = wokFbxMesh;
             var wokRenderer = wokObj.AddComponent<MeshRenderer>();
             wokRenderer.sharedMaterial = wokMat;
             wokObj.transform.position = Vector3.zero;
+            wokObj.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
             // 7. GameManager配置
             GameObject gmObj = new GameObject("GameManager");
@@ -251,24 +252,27 @@ namespace ChahanGame.Editor
             eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
             eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
 
-            // 上部HUD
-            GameObject topHud = CreateUIPanel(canvasObj, "TopHUD", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0, -120), new Vector2(0, 240));
-            Text timeText = CreateUIText(topHud, "TimeText", "45", font, 52, FontStyle.Bold, Color.yellow, new Vector2(0.1f, 0.5f), new Vector2(120, 80));
-            Text comboText = CreateUIText(topHud, "ComboText", "COMBO 0", font, 36, FontStyle.Bold, new Color(1f, 0.6f, 0.1f), new Vector2(0.5f, 0.7f), new Vector2(300, 60));
-            Text feedbackText = CreateUIText(topHud, "FeedbackText", "READY", font, 34, FontStyle.Bold, Color.green, new Vector2(0.5f, 0.28f), new Vector2(700, 60));
+            // 上部HUD (コンパクトに上端に集約)
+            GameObject topHud = CreateUIPanel(canvasObj, "TopHUD", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0, -90), new Vector2(0, 180), new Color(0.06f, 0.07f, 0.10f, 0.88f));
+            Text timeText = CreateUIText(topHud, "TimeText", "45", font, 52, FontStyle.Bold, Color.yellow, new Vector2(0.1f, 0.6f), new Vector2(120, 70));
+            Text comboText = CreateUIText(topHud, "ComboText", "COMBO 0", font, 36, FontStyle.Bold, new Color(1f, 0.6f, 0.1f), new Vector2(0.5f, 0.72f), new Vector2(300, 50));
+            Text feedbackText = CreateUIText(topHud, "FeedbackText", "READY", font, 32, FontStyle.Bold, Color.green, new Vector2(0.5f, 0.35f), new Vector2(700, 50));
 
-            Slider drySlider = CreateUISlider(topHud, "DrynessSlider", new Vector2(0.3f, -40), new Vector2(260, 24), new Color(0.2f, 0.6f, 1f));
-            Slider heatSlider = CreateUISlider(topHud, "HeatSlider", new Vector2(0.7f, -40), new Vector2(260, 24), new Color(1f, 0.3f, 0.2f));
+            Slider drySlider = CreateUISlider(topHud, "DrynessSlider", new Vector2(0.28f, -48), new Vector2(250, 22), new Color(0.2f, 0.6f, 1f));
+            Slider heatSlider = CreateUISlider(topHud, "HeatSlider", new Vector2(0.72f, -48), new Vector2(250, 22), new Color(1f, 0.3f, 0.2f));
 
-            // 下部ボタン
-            GameObject botHud = CreateUIPanel(canvasObj, "BottomHUD", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 220), new Vector2(0, 440));
-            Button eggBtn = CreateUIButton(botHud, "EggBtn", "🥚 溶き卵", font, 28, new Vector2(-360, 80), new Vector2(220, 110));
-            Button riceBtn = CreateUIButton(botHud, "RiceBtn", "🍚 ご飯", font, 28, new Vector2(-120, 80), new Vector2(220, 110));
-            Button meatBtn = CreateUIButton(botHud, "MeatBtn", "🥩 肉", font, 28, new Vector2(120, 80), new Vector2(220, 110));
-            Button onionBtn = CreateUIButton(botHud, "OnionBtn", "🌱 ネギ", font, 28, new Vector2(360, 80), new Vector2(220, 110));
+            // 下部ボタンHUD (中華鍋グラフィックに一切重ならない下部専用コントロールパネル: 高さ520px)
+            GameObject botHud = CreateUIPanel(canvasObj, "BottomHUD", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 260), new Vector2(0, 520), new Color(0.06f, 0.07f, 0.10f, 0.95f));
+            
+            // 上段: 具材ボタン 4種
+            Button eggBtn = CreateUIButton(botHud, "EggBtn", "🥚 溶き卵", font, 28, new Vector2(-380, 135), new Vector2(220, 115), new Color(0.85f, 0.70f, 0.20f));
+            Button riceBtn = CreateUIButton(botHud, "RiceBtn", "🍚 ご飯", font, 28, new Vector2(-125, 135), new Vector2(220, 115), new Color(0.82f, 0.84f, 0.86f));
+            Button meatBtn = CreateUIButton(botHud, "MeatBtn", "🥩 肉", font, 28, new Vector2(125, 135), new Vector2(220, 115), new Color(0.65f, 0.25f, 0.18f));
+            Button onionBtn = CreateUIButton(botHud, "OnionBtn", "🌱 ネギ", font, 28, new Vector2(380, 135), new Vector2(220, 115), new Color(0.20f, 0.65f, 0.28f));
 
-            Button soyBtn = CreateUIButton(botHud, "SoyBtn", "🍶 鍋肌醤油", font, 30, new Vector2(-220, -50), new Vector2(360, 110), new Color(0.45f, 0.2f, 0.12f));
-            Button ladleBtn = CreateUIButton(botHud, "LadleBtn", "🥄 お玉まとめ", font, 30, new Vector2(220, -50), new Vector2(360, 110), new Color(0.18f, 0.32f, 0.5f));
+            // 下段: アクションボタン 2種
+            Button soyBtn = CreateUIButton(botHud, "SoyBtn", "🍶 鍋肌醤油", font, 32, new Vector2(-250, -15), new Vector2(480, 125), new Color(0.42f, 0.20f, 0.12f));
+            Button ladleBtn = CreateUIButton(botHud, "LadleBtn", "🥄 お玉まとめ / 皿盛り", font, 30, new Vector2(250, -15), new Vector2(480, 125), new Color(0.85f, 0.62f, 0.15f));
 
             // リザルトパネル
             GameObject resultPanel = CreateUIPanel(canvasObj, "ResultPanel", new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, new Color(0.05f, 0.05f, 0.08f, 0.94f));

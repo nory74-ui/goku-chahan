@@ -196,13 +196,15 @@ body {
   to { opacity: 1; }
 }
 
-/* 下部アクションパレット */
+/* 下部アクションパレット (中華鍋グラフィックに重ならない下部専用コントロールパネル) */
 #action-palette {
   pointer-events: auto;
-  background: linear-gradient(0deg, rgba(16, 17, 24, 0.96) 0%, rgba(16, 17, 24, 0.8) 75%, transparent 100%);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  padding: 12px 14px 20px;
+  background: linear-gradient(0deg, rgba(14, 15, 22, 0.98) 0%, rgba(18, 20, 28, 0.92) 80%, rgba(22, 24, 34, 0.85) 100%);
+  border-top: 1px solid rgba(255, 202, 40, 0.25);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 12px));
   display: flex;
   flex-direction: column;
   gap: 8px;
