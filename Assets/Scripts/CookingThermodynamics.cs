@@ -189,6 +189,7 @@ namespace ChahanGame
             if (CurrentPhase != GamePhase.Cooking || EggTime >= 0) return;
             EggTime = timeLimit - RemainingTime;
             if (audioManager != null) audioManager.PlayAdd();
+            if (riceController != null) riceController.SpawnEgg();
             OnFeedbackMessage?.Invoke("半熟のうちにご飯を入れろ！", Color.yellow);
         }
 
@@ -197,6 +198,7 @@ namespace ChahanGame
             if (CurrentPhase != GamePhase.Cooking || EggTime < 0 || RiceTime >= 0) return;
             RiceTime = timeLimit - RemainingTime;
             if (audioManager != null) audioManager.PlayAdd();
+            if (riceController != null) riceController.SpawnRice();
 
             float eggRiceDiff = RiceTime - EggTime;
             if (eggRiceDiff >= 1.2f && eggRiceDiff <= 3.2f)

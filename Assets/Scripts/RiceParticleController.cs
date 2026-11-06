@@ -6,12 +6,10 @@ namespace ChahanGame
     {
         Rice,
         Meat,
-        Onion
+        Onion,
+        Egg
     }
 
-    /// <summary>
-    /// 各具材・米粒の物理シミュレーション状態
-    /// </summary>
     public struct ParticleData
     {
         public IngredientType Type;
@@ -19,18 +17,19 @@ namespace ChahanGame
         public Vector3 Velocity;
         public Quaternion Rotation;
         public Vector3 AngularVelocity;
-        public float CookState; // 0: 生米, 0.5: 卵コーティング, 1.0: 黄金パラパラ, 2.0: 焦げ
+        public float CookState;
         public bool InLadle;
         public bool IsActive;
         public float Scale;
     }
 
     /// <summary>
-    /// GPU Instancing を用いた米粒＋具材（チャーシュー・ネギ）の超軽量物理シミュレーション＆レンダラー
+    /// Blender製のリアル3Dモデル群（米粒、乱切りチャーシュー、中空長ネギ、ふんわり炒り卵）を
+    /// GPU Instancing で一括描画・シミュレーションするコントローラー
     /// </summary>
     public class RiceParticleController : MonoBehaviour
     {
-        [Header("Meshes & Materials")]
+        [Header("Blender FBX Meshes & Materials")]
         [SerializeField] private Mesh riceMesh;
         [SerializeField] private Material riceMaterial;
 
@@ -40,36 +39,42 @@ namespace ChahanGame
         [SerializeField] private Mesh onionMesh;
         [SerializeField] private Material onionMaterial;
 
+        [SerializeField] private Mesh eggMesh;
+        [SerializeField] private Material eggMaterial;
+
         [Header("Counts")]
         [SerializeField] private int maxRiceCount = 800;
-        [SerializeField] private int maxMeatCount = 30;
-        [SerializeField] private int maxOnionCount = 40;
+        [SerializeField] private int maxMeatCount = 28;
+        [SerializeField] private int maxOnionCount = 36;
+        [SerializeField] private int maxEggCount = 32;
 
-        [Header("Wok Geometry (y = curvature * (x^2 + z^2))")]
-        [SerializeField] private float wokCurvature = 0.8f;
+        [Header("Wok Geometry")]
+        [SerializeField] private float wokCurvature = 0.85f;
         [SerializeField] private float wokRadius = 1.6f;
 
-        [Header("Physics Parameters")]
+        [Header("Physics")]
         [SerializeField] private float gravity = 9.8f;
-        [SerializeField] private float friction = 0.92f;
-        [SerializeField] private float restitution = 0.25f;
+        [SerializeField] private float friction = 0.90f;
+        [SerializeField] private float restitution = 0.20f;
 
-        // 内部データ
         private ParticleData[] _riceParticles;
         private ParticleData[] _meatParticles;
         private ParticleData[] _onionParticles;
+        private ParticleData[] _eggParticles;
 
         private Matrix4x4[] _riceMatrices;
         private Matrix4x4[] _meatMatrices;
         private Matrix4x4[] _onionMatrices;
+        private Matrix4x4[] _eggMatrices;
 
         private float[] _riceCookStates;
         private MaterialPropertyBlock _propertyBlock;
-
         private static readonly int CookStateId = Shader.PropertyToID("_CookState");
 
+        private bool _riceSpawned = false;
         private bool _meatSpawned = false;
         private bool _onionSpawned = false;
+        private bool _eggSpawned = false;
 
         private void Awake()
         {
@@ -80,14 +85,14 @@ namespace ChahanGame
         {
             _propertyBlock = new MaterialPropertyBlock();
 
-            // 米粒
+            // 1. 米粒 (800粒)
             _riceParticles = new ParticleData[maxRiceCount];
             _riceMatrices = new Matrix4x4[maxRiceCount];
             _riceCookStates = new float[maxRiceCount];
 
             for (int i = 0; i < maxRiceCount; i++)
             {
-                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.42f);
+                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.40f);
                 float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y);
 
                 _riceParticles[i] = new ParticleData
@@ -99,14 +104,14 @@ namespace ChahanGame
                     AngularVelocity = Random.insideUnitSphere * 4f,
                     CookState = 0.1f,
                     InLadle = false,
-                    IsActive = true,
-                    Scale = 0.08f
+                    IsActive = false,
+                    Scale = 0.085f
                 };
-                _riceMatrices[i] = Matrix4x4.TRS(_riceParticles[i].Position, _riceParticles[i].Rotation, Vector3.one * 0.08f);
+                _riceMatrices[i] = Matrix4x4.identity;
                 _riceCookStates[i] = 0.1f;
             }
 
-            // チャーシュー
+            // 2. チャーシュー (28個)
             _meatParticles = new ParticleData[maxMeatCount];
             _meatMatrices = new Matrix4x4[maxMeatCount];
             for (int i = 0; i < maxMeatCount; i++)
@@ -120,12 +125,12 @@ namespace ChahanGame
                     AngularVelocity = Random.insideUnitSphere * 3f,
                     InLadle = false,
                     IsActive = false,
-                    Scale = 0.12f
+                    Scale = 0.11f
                 };
                 _meatMatrices[i] = Matrix4x4.identity;
             }
 
-            // ネギ
+            // 3. 長ネギ (36個)
             _onionParticles = new ParticleData[maxOnionCount];
             _onionMatrices = new Matrix4x4[maxOnionCount];
             for (int i = 0; i < maxOnionCount; i++)
@@ -143,6 +148,48 @@ namespace ChahanGame
                 };
                 _onionMatrices[i] = Matrix4x4.identity;
             }
+
+            // 4. 炒り卵そぼろ (32個)
+            _eggParticles = new ParticleData[maxEggCount];
+            _eggMatrices = new Matrix4x4[maxEggCount];
+            for (int i = 0; i < maxEggCount; i++)
+            {
+                _eggParticles[i] = new ParticleData
+                {
+                    Type = IngredientType.Egg,
+                    Position = Vector3.zero,
+                    Velocity = Vector3.zero,
+                    Rotation = Random.rotation,
+                    AngularVelocity = Random.insideUnitSphere * 4f,
+                    InLadle = false,
+                    IsActive = false,
+                    Scale = 0.13f
+                };
+                _eggMatrices[i] = Matrix4x4.identity;
+            }
+        }
+
+        public void SpawnEgg()
+        {
+            _eggSpawned = true;
+            for (int i = 0; i < maxEggCount; i++)
+            {
+                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.35f);
+                float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y) + 0.15f;
+                _eggParticles[i].Position = new Vector3(circle.x, y, circle.y);
+                _eggParticles[i].Velocity = new Vector3(Random.Range(-0.3f, 0.3f), 0.8f, Random.Range(-0.3f, 0.3f));
+                _eggParticles[i].IsActive = true;
+            }
+        }
+
+        public void SpawnRice()
+        {
+            _riceSpawned = true;
+            for (int i = 0; i < maxRiceCount; i++)
+            {
+                _riceParticles[i].IsActive = true;
+                _riceParticles[i].Velocity = new Vector3(Random.Range(-0.4f, 0.4f), 1.0f, Random.Range(-0.4f, 0.4f));
+            }
         }
 
         public void SpawnMeat()
@@ -150,10 +197,10 @@ namespace ChahanGame
             _meatSpawned = true;
             for (int i = 0; i < maxMeatCount; i++)
             {
-                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.5f);
-                float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y) + 0.3f;
+                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.45f);
+                float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y) + 0.35f;
                 _meatParticles[i].Position = new Vector3(circle.x, y, circle.y);
-                _meatParticles[i].Velocity = new Vector3(Random.Range(-0.5f, 0.5f), 1.2f, Random.Range(-0.5f, 0.5f));
+                _meatParticles[i].Velocity = new Vector3(Random.Range(-0.4f, 0.4f), 1.2f, Random.Range(-0.4f, 0.4f));
                 _meatParticles[i].IsActive = true;
             }
         }
@@ -163,10 +210,10 @@ namespace ChahanGame
             _onionSpawned = true;
             for (int i = 0; i < maxOnionCount; i++)
             {
-                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.5f);
-                float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y) + 0.3f;
+                Vector2 circle = Random.insideUnitCircle * (wokRadius * 0.45f);
+                float y = wokCurvature * (circle.x * circle.x + circle.y * circle.y) + 0.35f;
                 _onionParticles[i].Position = new Vector3(circle.x, y, circle.y);
-                _onionParticles[i].Velocity = new Vector3(Random.Range(-0.5f, 0.5f), 1.2f, Random.Range(-0.5f, 0.5f));
+                _onionParticles[i].Velocity = new Vector3(Random.Range(-0.4f, 0.4f), 1.2f, Random.Range(-0.4f, 0.4f));
                 _onionParticles[i].IsActive = true;
             }
         }
@@ -175,20 +222,10 @@ namespace ChahanGame
         {
             float dt = Time.deltaTime;
 
-            // 米粒
-            SimulateGroup(_riceParticles, _riceMatrices, maxRiceCount, dt, true);
-
-            // チャーシュー
-            if (_meatSpawned)
-            {
-                SimulateGroup(_meatParticles, _meatMatrices, maxMeatCount, dt, false);
-            }
-
-            // ネギ
-            if (_onionSpawned)
-            {
-                SimulateGroup(_onionParticles, _onionMatrices, maxOnionCount, dt, false);
-            }
+            if (_eggSpawned) SimulateGroup(_eggParticles, _eggMatrices, maxEggCount, dt, false);
+            if (_riceSpawned) SimulateGroup(_riceParticles, _riceMatrices, maxRiceCount, dt, true);
+            if (_meatSpawned) SimulateGroup(_meatParticles, _meatMatrices, maxMeatCount, dt, false);
+            if (_onionSpawned) SimulateGroup(_onionParticles, _onionMatrices, maxOnionCount, dt, false);
 
             RenderAll();
         }
@@ -253,13 +290,10 @@ namespace ChahanGame
             float baseLift = 4.2f * toss.Power;
             float pullForward = -1.2f * toss.Power;
 
-            ApplyTossToGroup(_riceParticles, maxRiceCount, baseLift, pullForward, toss.Power);
-
-            if (_meatSpawned)
-                ApplyTossToGroup(_meatParticles, maxMeatCount, baseLift * 0.95f, pullForward, toss.Power);
-
-            if (_onionSpawned)
-                ApplyTossToGroup(_onionParticles, maxOnionCount, baseLift * 1.05f, pullForward, toss.Power);
+            if (_eggSpawned) ApplyTossToGroup(_eggParticles, maxEggCount, baseLift * 0.92f, pullForward, toss.Power);
+            if (_riceSpawned) ApplyTossToGroup(_riceParticles, maxRiceCount, baseLift, pullForward, toss.Power);
+            if (_meatSpawned) ApplyTossToGroup(_meatParticles, maxMeatCount, baseLift * 0.95f, pullForward, toss.Power);
+            if (_onionSpawned) ApplyTossToGroup(_onionParticles, maxOnionCount, baseLift * 1.05f, pullForward, toss.Power);
         }
 
         private void ApplyTossToGroup(ParticleData[] particles, int count, float baseLift, float pullForward, float power)
@@ -289,6 +323,7 @@ namespace ChahanGame
 
         public void GatherIntoLadle()
         {
+            for (int i = 0; i < maxEggCount; i++) _eggParticles[i].InLadle = true;
             for (int i = 0; i < maxRiceCount; i++) _riceParticles[i].InLadle = true;
             for (int i = 0; i < maxMeatCount; i++) _meatParticles[i].InLadle = true;
             for (int i = 0; i < maxOnionCount; i++) _onionParticles[i].InLadle = true;
@@ -296,20 +331,19 @@ namespace ChahanGame
 
         private void RenderAll()
         {
-            // 米粒描画
-            if (riceMesh != null && riceMaterial != null)
+            if (_eggSpawned && eggMesh != null && eggMaterial != null)
+            {
+                Graphics.DrawMeshInstanced(eggMesh, 0, eggMaterial, _eggMatrices, maxEggCount);
+            }
+            if (_riceSpawned && riceMesh != null && riceMaterial != null)
             {
                 _propertyBlock.SetFloatArray(CookStateId, _riceCookStates);
                 Graphics.DrawMeshInstanced(riceMesh, 0, riceMaterial, _riceMatrices, maxRiceCount, _propertyBlock);
             }
-
-            // チャーシュー描画
             if (_meatSpawned && meatMesh != null && meatMaterial != null)
             {
                 Graphics.DrawMeshInstanced(meatMesh, 0, meatMaterial, _meatMatrices, maxMeatCount);
             }
-
-            // ネギ描画
             if (_onionSpawned && onionMesh != null && onionMaterial != null)
             {
                 Graphics.DrawMeshInstanced(onionMesh, 0, onionMaterial, _onionMatrices, maxOnionCount);
