@@ -96,6 +96,11 @@ namespace ChahanGame
             OnionTime = -1f;
             SoyTime = -1f;
 
+            if (riceController != null)
+            {
+                riceController.ResetAll();
+            }
+
             OnPhaseChanged?.Invoke(CurrentPhase);
             OnFeedbackMessage?.Invoke("熱々の油に卵を投入せよ！", new Color(1f, 0.8f, 0.2f));
         }

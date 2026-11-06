@@ -329,6 +329,30 @@ namespace ChahanGame
             for (int i = 0; i < maxOnionCount; i++) _onionParticles[i].InLadle = true;
         }
 
+        public void ResetAll()
+        {
+            _eggSpawned = false;
+            _riceSpawned = false;
+            _meatSpawned = false;
+            _onionSpawned = false;
+            if (_eggParticles != null)
+            {
+                for (int i = 0; i < maxEggCount; i++) { _eggParticles[i].IsActive = false; _eggParticles[i].InLadle = false; }
+            }
+            if (_riceParticles != null)
+            {
+                for (int i = 0; i < maxRiceCount; i++) { _riceParticles[i].IsActive = false; _riceParticles[i].InLadle = false; _riceCookStates[i] = 0.1f; }
+            }
+            if (_meatParticles != null)
+            {
+                for (int i = 0; i < maxMeatCount; i++) { _meatParticles[i].IsActive = false; _meatParticles[i].InLadle = false; }
+            }
+            if (_onionParticles != null)
+            {
+                for (int i = 0; i < maxOnionCount; i++) { _onionParticles[i].IsActive = false; _onionParticles[i].InLadle = false; }
+            }
+        }
+
         private void RenderAll()
         {
             if (_eggSpawned && eggMesh != null && eggMaterial != null)

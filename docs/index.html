@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>極・炒飯道 3D - 物理演算リアル中華鍋シミュレーター</title>
-  <link rel="stylesheet" href="style.css?v=20261107_1">
+  <link rel="stylesheet" href="style.css?v=20261107_3">
 
   <!-- ES Modules Import Map: Three.js & Rapier.js (WASM物理エンジン) -->
   <script type="importmap">
@@ -82,25 +82,25 @@
           <span class="icon">🥚</span>
           <span class="name">溶き卵</span>
         </button>
-        <button id="btn-rice" class="ingredient-btn" data-type="rice">
+        <button id="btn-rice" class="ingredient-btn" data-type="rice" disabled>
           <span class="icon">🍚</span>
           <span class="name">ご飯</span>
         </button>
-        <button id="btn-meat" class="ingredient-btn" data-type="meat">
+        <button id="btn-meat" class="ingredient-btn" data-type="meat" disabled>
           <span class="icon">🥩</span>
           <span class="name">チャーシュー</span>
         </button>
-        <button id="btn-greenonion" class="ingredient-btn" data-type="greenonion">
+        <button id="btn-greenonion" class="ingredient-btn" data-type="greenonion" disabled>
           <span class="icon">🌱</span>
           <span class="name">長ネギ</span>
         </button>
       </div>
       <div class="palette-row second">
-        <button id="btn-soy" class="action-btn soy-btn">
+        <button id="btn-soy" class="action-btn soy-btn" disabled>
           <span class="icon">🍶</span>
           <span class="name">鍋肌醤油</span>
         </button>
-        <button id="btn-ladle" class="action-btn ladle-btn">
+        <button id="btn-ladle" class="action-btn ladle-btn" disabled>
           <span class="icon">🥄</span>
           <span class="name">お玉まとめ / 皿盛り</span>
         </button>
@@ -165,6 +165,6 @@
   </div>
 
   <!-- メイン3Dゲームスクリプト -->
-  <script type="module" src="game3d.js?v=20261107_1"></script>
+  <script type="module" src="game3d.js?v=20261107_3"></script>
 </body>
 </html>

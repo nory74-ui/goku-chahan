@@ -4,6 +4,7 @@
  */
 
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 
 // --- 1. Web Audio API 音響エンジン ---
@@ -222,13 +223,19 @@ class GokuChahan3D {
     this.riceBodies = [];
     this.riceBurnTimers = new Float32Array(this.riceCount);
 
+    // 炒り卵（ふんわり半熟そぼろ塊）
+    this.eggCount = 48;
+    this.eggInstancedMesh = null;
+    this.eggBodies = [];
+    this.eggSpawned = false;
+
     // 具材メッシュ・剛体
-    this.meatCount = 20;
+    this.meatCount = 24;
     this.meatInstancedMesh = null;
     this.meatBodies = [];
     this.meatSpawned = false;
 
-    this.onionCount = 25;
+    this.onionCount = 28;
     this.onionInstancedMesh = null;
     this.onionBodies = [];
     this.onionSpawned = false;
@@ -294,26 +301,47 @@ class GokuChahan3D {
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.25;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // ライティング
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    // RoomEnvironment による映画級スタジオ・厨房環境反射の生成（鉄鍋の油膜や具材のツヤが格段にリアル化）
+    try {
+      const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+      pmremGenerator.compileEquirectangularShader();
+      const envTexture = pmremGenerator.fromScene(new RoomEnvironment(this.renderer), 0.04).texture;
+      this.scene.environment = envTexture;
+    } catch (e) {
+      console.warn('RoomEnvironment init failed:', e);
+    }
+
+    // ライティング (厨房の映画調ライティング: 米粒と鉄鍋の油膜が黒く潰れず美しく輝く)
+    const ambientLight = new THREE.AmbientLight(0xfff7ed, 0.9);
     this.scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xfffaed, 2.0);
-    dirLight.position.set(2, 6, 3);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.6);
+    dirLight.position.set(1.8, 6.8, 2.6);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 1024;
-    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.bias = -0.0005;
     this.scene.add(dirLight);
 
-    // 鍋底のコンロ熱（オレンジの赤熱グロー）
-    this.stoveLight = new THREE.PointLight(0xff3d00, 1.2, 4.0);
+    // 補助フィルライト (真上から全体を照らし影の黒潰れを防止)
+    const fillLight = new THREE.DirectionalLight(0xe8f0ff, 1.1);
+    fillLight.position.set(-2.5, 5.0, -1.5);
+    this.scene.add(fillLight);
+
+    // 鍋底のコンロ熱（オレンジの赤熱グロー ＋ 青いガス炎）
+    this.stoveLight = new THREE.PointLight(0xff5722, 1.8, 4.0);
     this.stoveLight.position.set(0, 0.05, 0);
     this.scene.add(this.stoveLight);
+
+    const blueFlameLight = new THREE.PointLight(0x00b0ff, 2.0, 3.2);
+    blueFlameLight.position.set(0, -0.2, 0);
+    this.scene.add(blueFlameLight);
   }
 
   // スマホ・タブレット縦画面およびPC横画面で、中華鍋全体が美しく収まり下部ボタンと一切重ならないカメラ調整
@@ -325,16 +353,16 @@ class GokuChahan3D {
     if (aspect < 1.0) {
       // スマホ・タブレット縦画面 (9:16 〜 3:4)
       // 横幅に合わせてFOVを拡張し、注視点を奥にシフトして下部ボタンエリアと中華鍋を完全分離
-      const targetFov = 50 / aspect * 0.56;
+      const targetFov = 50 / aspect * 0.54;
       this.camera.fov = Math.min(68, Math.max(48, targetFov));
-      this.camera.position.set(0, 4.8, 2.0);
-      this.camera.lookAt(0, 0.2, 0.45);
+      this.camera.position.set(0, 5.0, 2.1);
+      this.camera.lookAt(0, 0.2, 0.50);
     } else {
       // PC・横画面 (16:9, 16:10, 4:3)
       // 中華鍋全体（手前ハンドル含む）を画面上部〜中央に配置し、下部操作ボタンと絶対に重ならないアングル
-      this.camera.fov = 42;
-      this.camera.position.set(0, 4.8, 2.7);
-      this.camera.lookAt(0, 0.2, 0.70);
+      this.camera.fov = 40;
+      this.camera.position.set(0, 5.2, 2.9);
+      this.camera.lookAt(0, 0.2, 0.85);
     }
     this.camera.updateProjectionMatrix();
   }
@@ -387,14 +415,23 @@ class GokuChahan3D {
 
     const texLoader = new THREE.TextureLoader();
     const wokTex = texLoader.load('textures/wok_diffuse.jpg');
+    wokTex.colorSpace = THREE.SRGBColorSpace;
     wokTex.wrapS = THREE.RepeatWrapping;
     wokTex.wrapT = THREE.RepeatWrapping;
+    wokTex.repeat.set(2, 2);
 
-    // 黒光りする鋳鉄PBRマテリアル (実写シーズニングテクスチャ適用)
+    const wokNormal = texLoader.load('textures/wok_hammer_normal.png');
+    wokNormal.wrapS = THREE.RepeatWrapping;
+    wokNormal.wrapT = THREE.RepeatWrapping;
+    wokNormal.repeat.set(4, 4);
+
+    // 黒光りする打ち出し鋳鉄PBRマテリアル (実写シーズニング ＋ 職人手打ち槌目ノーマルマップ)
     const wokMat = new THREE.MeshStandardMaterial({
       map: wokTex,
-      roughness: 0.28,
-      metalness: 0.88,
+      normalMap: wokNormal,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+      roughness: 0.22,
+      metalness: 0.86,
       side: THREE.DoubleSide
     });
 
@@ -402,17 +439,31 @@ class GokuChahan3D {
     this.wokMesh.receiveShadow = true;
     this.scene.add(this.wokMesh);
 
-    // 木製ハンドル（手前）
-    const handleGeom = new THREE.CylinderGeometry(0.06, 0.08, 0.7, 16);
+    // 木製ハンドル（手前）＋ 金属補強バンド
+    const handleGroup = new THREE.Group();
+    const handleGeom = new THREE.CylinderGeometry(0.06, 0.08, 0.72, 16);
     const handleMat = new THREE.MeshStandardMaterial({
-      color: 0x4a2e18,
-      roughness: 0.45,
+      color: 0x3d2413,
+      roughness: 0.40,
       metalness: 0.05
     });
     const handle = new THREE.Mesh(handleGeom, handleMat);
     handle.rotation.x = Math.PI / 2.3;
     handle.position.set(0, 0.35, R + 0.35);
-    this.wokMesh.add(handle);
+    handleGroup.add(handle);
+
+    const ringGeom = new THREE.CylinderGeometry(0.075, 0.075, 0.06, 16);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x999999,
+      roughness: 0.25,
+      metalness: 0.90
+    });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    ring.rotation.x = Math.PI / 2.3;
+    ring.position.set(0, 0.18, R + 0.12);
+    handleGroup.add(ring);
+
+    this.wokMesh.add(handleGroup);
 
     // Rapier Trimesh コライダー（お椀型の当たり判定）
     const float32Verts = new Float32Array(vertices);
@@ -428,49 +479,53 @@ class GokuChahan3D {
     this.world.createCollider(wokColliderDesc, this.wokRigidBody);
   }
 
-  // --- 米粒 ＆ 具材の剛体初期化 ---
+  // --- 米粒 ＆ 具材の剛体初期化（最初は全具材が画面外・非表示の空鍋スタート） ---
   buildRiceAndIngredients() {
     const texLoader = new THREE.TextureLoader();
     const riceTex = texLoader.load('textures/rice_diffuse.jpg');
-    const meatTex = texLoader.load('textures/meat_diffuse.jpg');
-    const onionTex = texLoader.load('textures/onion_diffuse.jpg');
+    riceTex.colorSpace = THREE.SRGBColorSpace;
 
-    // 1. 米粒 InstancedMesh (240粒)
-    const riceGeom = new THREE.SphereGeometry(0.045, 8, 8);
-    riceGeom.scale(1.0, 0.75, 1.35); // 米粒の細長い形状
+    const meatTex = texLoader.load('textures/meat_diffuse.jpg');
+    meatTex.colorSpace = THREE.SRGBColorSpace;
+
+    const onionTex = texLoader.load('textures/onion_diffuse.jpg');
+    onionTex.colorSpace = THREE.SRGBColorSpace;
+
+    const eggTex = texLoader.load('textures/egg_diffuse.jpg');
+    eggTex.colorSpace = THREE.SRGBColorSpace;
+
+    const dummy = new THREE.Object3D();
+    dummy.position.set(0, 10, 0);
+    dummy.updateMatrix();
+
+    // 1. 米粒 InstancedMesh (240粒: 油膜でコーティングされた粒立ち白米)
+    const riceGeom = new THREE.SphereGeometry(0.046, 8, 8);
+    riceGeom.scale(1.0, 0.78, 1.4); // 実物大の米粒形状
 
     const riceMat = new THREE.MeshStandardMaterial({
       map: riceTex,
-      roughness: 0.32,
-      metalness: 0.08
+      roughness: 0.16, // 油のツヤ・濡れ感
+      metalness: 0.02
     });
 
     this.riceInstancedMesh = new THREE.InstancedMesh(riceGeom, riceMat, this.riceCount);
     this.riceInstancedMesh.castShadow = true;
     this.riceInstancedMesh.receiveShadow = true;
     this.riceInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.riceInstancedMesh.visible = false;
     this.scene.add(this.riceInstancedMesh);
 
-    const dummy = new THREE.Object3D();
     const defaultColor = new THREE.Color(0xffffff);
 
     for (let i = 0; i < this.riceCount; i++) {
-      // 鍋の底周辺にランダム配置
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * (this.wokRadius * 0.38);
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-      const y = (this.wokDepth / (this.wokRadius * this.wokRadius)) * (r * r) + 0.05 + Math.random() * 0.15;
-
       const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(x, y, z)
+        .setTranslation(0, 10, 0)
         .setLinearDamping(0.15)
         .setAngularDamping(0.25);
 
       const body = this.world.createRigidBody(bodyDesc);
-      body.setEnabled(false); // 初期は非アクティブ（ご飯投入で有効化）
+      body.setEnabled(false); // 初期は画面外＆非アクティブ
 
-      // 球体コライダーで高速・滑らかに滑る
       const colliderDesc = RAPIER.ColliderDesc.ball(0.045)
         .setFriction(0.08)
         .setRestitution(0.18);
@@ -479,20 +534,45 @@ class GokuChahan3D {
       this.riceBodies.push(body);
       this.riceBurnTimers[i] = 0;
 
-      dummy.position.set(x, y, z);
-      dummy.updateMatrix();
       this.riceInstancedMesh.setMatrixAt(i, dummy.matrix);
       this.riceInstancedMesh.setColorAt(i, defaultColor);
     }
     this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
-    this.riceInstancedMesh.instanceColor.needsUpdate = true;
-    this.riceInstancedMesh.visible = false;
+    if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
 
-    // 2. チャーシュー InstancedMesh (20個)
+    // 2. ふんわり炒り卵 InstancedMesh (48個: 実写半熟テクスチャ ＋ 温かな黄金グロー)
+    const eggGeom = new THREE.SphereGeometry(0.082, 8, 7);
+    eggGeom.scale(1.35, 0.75, 1.15); // ふんわりほぐれた半熟そぼろ形状
+    const eggMat = new THREE.MeshStandardMaterial({
+      map: eggTex,
+      color: 0xfff0aa,
+      roughness: 0.32,
+      metalness: 0.0,
+      emissive: 0x221800 // 鍋底の影でも鮮やかに見える自発光
+    });
+    this.eggInstancedMesh = new THREE.InstancedMesh(eggGeom, eggMat, this.eggCount);
+    this.eggInstancedMesh.castShadow = true;
+    this.eggInstancedMesh.visible = false;
+    this.scene.add(this.eggInstancedMesh);
+
+    for (let i = 0; i < this.eggCount; i++) {
+      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
+      const body = this.world.createRigidBody(bodyDesc);
+      body.setEnabled(false);
+      const colliderDesc = RAPIER.ColliderDesc.ball(0.07)
+        .setFriction(0.10)
+        .setRestitution(0.20);
+      this.world.createCollider(colliderDesc, body);
+      this.eggBodies.push(body);
+      this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
+    }
+    this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
+
+    // 3. チャーシュー InstancedMesh (24個: 秘伝ダレの照りと脂身)
     const meatGeom = new THREE.BoxGeometry(0.09, 0.09, 0.09);
     const meatMat = new THREE.MeshStandardMaterial({
       map: meatTex,
-      roughness: 0.45,
+      roughness: 0.28,
       metalness: 0.05
     });
     this.meatInstancedMesh = new THREE.InstancedMesh(meatGeom, meatMat, this.meatCount);
@@ -501,7 +581,7 @@ class GokuChahan3D {
     this.scene.add(this.meatInstancedMesh);
 
     for (let i = 0; i < this.meatCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 5, 0);
+      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
       const body = this.world.createRigidBody(bodyDesc);
       body.setEnabled(false);
       const colliderDesc = RAPIER.ColliderDesc.cuboid(0.045, 0.045, 0.045)
@@ -509,13 +589,15 @@ class GokuChahan3D {
         .setRestitution(0.2);
       this.world.createCollider(colliderDesc, body);
       this.meatBodies.push(body);
+      this.meatInstancedMesh.setMatrixAt(i, dummy.matrix);
     }
+    this.meatInstancedMesh.instanceMatrix.needsUpdate = true;
 
-    // 3. 長ネギ InstancedMesh (25個)
-    const onionGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.05, 10);
+    // 4. 長ネギ InstancedMesh (28個: シャキシャキ小口切り)
+    const onionGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.045, 12);
     const onionMat = new THREE.MeshStandardMaterial({
       map: onionTex,
-      roughness: 0.5,
+      roughness: 0.32,
       metalness: 0.0
     });
     this.onionInstancedMesh = new THREE.InstancedMesh(onionGeom, onionMat, this.onionCount);
@@ -524,15 +606,18 @@ class GokuChahan3D {
     this.scene.add(this.onionInstancedMesh);
 
     for (let i = 0; i < this.onionCount; i++) {
-      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 5, 0);
+      const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 10, 0);
       const body = this.world.createRigidBody(bodyDesc);
       body.setEnabled(false);
-      const colliderDesc = RAPIER.ColliderDesc.cylinder(0.025, 0.05)
+      const colliderDesc = RAPIER.ColliderDesc.cylinder(0.023, 0.05)
         .setFriction(0.1)
         .setRestitution(0.22);
       this.world.createCollider(colliderDesc, body);
       this.onionBodies.push(body);
+      this.onionInstancedMesh.setMatrixAt(i, dummy.matrix);
     }
+    this.onionInstancedMesh.instanceMatrix.needsUpdate = true;
+  }
   }
 
   // --- 湯気・煙パーティクル ---
@@ -699,6 +784,101 @@ class GokuChahan3D {
     });
   }
 
+  spawnEgg() {
+    this.eggSpawned = true;
+    this.eggInstancedMesh.visible = true;
+    const dummy = new THREE.Object3D();
+    this.eggBodies.forEach((body, i) => {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * (this.wokRadius * 0.35);
+      const x = Math.cos(a) * r;
+      const y = 0.16 + Math.random() * 0.10;
+      const z = Math.sin(a) * r;
+      body.setTranslation({ x, y, z }, true);
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
+      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
+
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.updateMatrix();
+      this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  spawnRice() {
+    this.riceInstancedMesh.visible = true;
+    const dummy = new THREE.Object3D();
+    const defaultColor = new THREE.Color(0xffffff);
+    this.riceBodies.forEach((body, i) => {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * (this.wokRadius * 0.34);
+      const x = Math.cos(a) * r;
+      const y = 0.22 + Math.random() * 0.20;
+      const z = Math.sin(a) * r;
+      body.setTranslation({ x, y, z }, true);
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.25, y: 0.3 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.25 }, true);
+      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
+      this.riceBurnTimers[i] = 0;
+
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.updateMatrix();
+      this.riceInstancedMesh.setMatrixAt(i, dummy.matrix);
+      this.riceInstancedMesh.setColorAt(i, defaultColor);
+    });
+    this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
+    if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
+  }
+
+  spawnMeat() {
+    this.meatSpawned = true;
+    this.meatInstancedMesh.visible = true;
+    const dummy = new THREE.Object3D();
+    this.meatBodies.forEach((body, i) => {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * (this.wokRadius * 0.36);
+      const x = Math.cos(a) * r;
+      const y = 0.30 + Math.random() * 0.15;
+      const z = Math.sin(a) * r;
+      body.setTranslation({ x, y, z }, true);
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
+      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
+
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.updateMatrix();
+      this.meatInstancedMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.meatInstancedMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  spawnOnion() {
+    this.onionSpawned = true;
+    this.onionInstancedMesh.visible = true;
+    const dummy = new THREE.Object3D();
+    this.onionBodies.forEach((body, i) => {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * (this.wokRadius * 0.36);
+      const x = Math.cos(a) * r;
+      const y = 0.30 + Math.random() * 0.15;
+      const z = Math.sin(a) * r;
+      body.setTranslation({ x, y, z }, true);
+      body.setEnabled(true);
+      body.setLinvel({ x: (Math.random() - 0.5) * 0.3, y: 0.35 + Math.random() * 0.2, z: (Math.random() - 0.5) * 0.3 }, true);
+      body.setAngvel({ x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * 2 }, true);
+
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.updateMatrix();
+      this.onionInstancedMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.onionInstancedMesh.instanceMatrix.needsUpdate = true;
+  }
+
   startGame() {
     this.gameState = 'COOKING';
     this.audio.isCooking = true;
@@ -710,40 +890,69 @@ class GokuChahan3D {
     this.timeRemaining = 45.0;
     this.score = 0;
     this.combo = 0;
-    this.dryness = 25;
-    this.heat = 45;
+    this.dryness = 0;
+    this.heat = 35;
     this.burnAmount = 0;
     this.wokHeiActive = false;
     this.wokHeiTossCount = 0;
 
-    // 開いた瞬間から米粒・チャーシュー・ネギが中華鍋で香ばしく炒められている状態で開始
-    this.riceInstancedMesh.visible = true;
-    this.riceBodies.forEach((body) => {
-      body.setEnabled(true);
-      body.setLinvel({ x: (Math.random() - 0.5) * 0.4, y: 0.2 + Math.random() * 0.6, z: (Math.random() - 0.5) * 0.4 }, true);
-    });
+    // 最初は油を引いて熱した「空の中華鍋」からスタート！
+    this.riceInstancedMesh.visible = false;
+    this.eggInstancedMesh.visible = false;
+    this.meatInstancedMesh.visible = false;
+    this.onionInstancedMesh.visible = false;
 
-    this.spawnMeat();
-    this.spawnOnion();
+    // ボタン初期状態: まずは溶き卵のみアクティブ
+    document.getElementById('btn-egg').disabled = false;
+    document.getElementById('btn-rice').disabled = true;
+    document.getElementById('btn-meat').disabled = true;
+    document.getElementById('btn-greenonion').disabled = true;
+    document.getElementById('btn-soy').disabled = true;
+    document.getElementById('btn-ladle').disabled = true;
 
-    this.showFeedback('🔥 手首のスナップで手前に引いて煽れ！', '#ffca28');
+    this.showFeedback('熱々の油に【🥚溶き卵】を投入せよ！', '#ffca28');
   }
 
   resetGame() {
     for (const key in this.ingredients) this.ingredients[key] = false;
+    for (const key in this.timings) this.timings[key] = 0;
+    this.eggSpawned = false;
     this.meatSpawned = false;
     this.onionSpawned = false;
-    this.riceInstancedMesh.visible = false;
-    this.meatInstancedMesh.visible = false;
-    this.onionInstancedMesh.visible = false;
 
-    // 剛体のリセット
+    if (this.riceInstancedMesh) this.riceInstancedMesh.visible = false;
+    if (this.eggInstancedMesh) this.eggInstancedMesh.visible = false;
+    if (this.meatInstancedMesh) this.meatInstancedMesh.visible = false;
+    if (this.onionInstancedMesh) this.onionInstancedMesh.visible = false;
+
+    // 全剛体を画面外(0, 10, 0)へ完全退避＆無効化＆速度リセット
+    const resetBody = (b) => {
+      b.setEnabled(false);
+      b.setTranslation({ x: 0, y: 10, z: 0 }, true);
+      b.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    };
     this.riceBodies.forEach((body, i) => {
-      body.setEnabled(false);
+      resetBody(body);
       this.riceBurnTimers[i] = 0;
     });
-    this.meatBodies.forEach(body => body.setEnabled(false));
-    this.onionBodies.forEach(body => body.setEnabled(false));
+    this.eggBodies.forEach(resetBody);
+    this.meatBodies.forEach(resetBody);
+    this.onionBodies.forEach(resetBody);
+
+    // リザルト画面・鍋肌ガイドを確実に隠す
+    const resultScreen = document.getElementById('result-screen');
+    if (resultScreen) resultScreen.classList.remove('active');
+    const rimEl = document.getElementById('rim-guide');
+    if (rimEl) rimEl.classList.remove('active');
+
+    // UIリセット
+    document.getElementById('meter-dryness').style.width = '0%';
+    document.getElementById('val-dryness').textContent = '0%';
+    document.getElementById('meter-heat').style.width = '35%';
+    document.getElementById('val-heat').textContent = '35%';
+    document.getElementById('combo-display').textContent = 'COMBO 0';
+    document.getElementById('score-val').textContent = '0';
   }
 
   // --- 調理インタラクション ---
@@ -758,7 +967,10 @@ class GokuChahan3D {
       document.getElementById('btn-rice').disabled = false;
       this.audio.playAdd();
       this.audio.playSoySizzle();
-      this.showFeedback('半熟のうちにご飯を入れろ！', '#ffca28');
+
+      // ふんわり半熟炒り卵の3D出現！
+      this.spawnEgg();
+      this.showFeedback('半熟のうちに【🍚ご飯】を入れろ！', '#ffca28');
     }
     else if (type === 'rice' && this.ingredients.egg && !this.ingredients.rice) {
       this.ingredients.rice = true;
@@ -770,21 +982,16 @@ class GokuChahan3D {
       document.getElementById('btn-ladle').disabled = false;
       this.audio.playAdd();
 
-      // 米粒の物理剛体を一斉にアクティブ化
-      this.riceInstancedMesh.visible = true;
+      // ご飯の3D出現！
+      this.spawnRice();
       const eggRiceDiff = this.timings.rice - this.timings.egg;
-      const isCoatingPerfect = (eggRiceDiff >= 1.2 && eggRiceDiff <= 3.2);
-
-      this.riceBodies.forEach((body) => {
-        body.setEnabled(true);
-        body.setLinvel({ x: (Math.random() - 0.5) * 0.4, y: 0.5, z: (Math.random() - 0.5) * 0.4 }, true);
-      });
+      const isCoatingPerfect = (eggRiceDiff >= 1.0 && eggRiceDiff <= 3.5);
 
       if (isCoatingPerfect) {
         this.showFeedback('黄金コーティング成功！(PERFECT)', '#00e676');
         this.addScore(800);
       } else {
-        this.showFeedback('米投入！鍋をあおってほぐせ！', '#ffb300');
+        this.showFeedback('米投入！【Space】で鍋をあおってほぐせ！', '#ffb300');
       }
     }
     else if (type === 'meat' && this.ingredients.rice && !this.ingredients.meat) {
@@ -793,15 +1000,7 @@ class GokuChahan3D {
       document.getElementById('btn-meat').disabled = true;
       this.audio.playAdd();
 
-      this.meatSpawned = true;
-      this.meatInstancedMesh.visible = true;
-      this.meatBodies.forEach((body) => {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * (this.wokRadius * 0.4);
-        body.setTranslation({ x: Math.cos(a) * r, y: 0.6, z: Math.sin(a) * r }, true);
-        body.setEnabled(true);
-        body.setLinvel({ x: (Math.random() - 0.5) * 0.5, y: 1.0, z: (Math.random() - 0.5) * 0.5 }, true);
-      });
+      this.spawnMeat();
       this.showFeedback('チャーシュー投入！', '#ff9800');
     }
     else if (type === 'greenonion' && this.ingredients.rice && !this.ingredients.greenonion) {
@@ -810,17 +1009,8 @@ class GokuChahan3D {
       document.getElementById('btn-greenonion').disabled = true;
       this.audio.playAdd();
 
-      this.onionSpawned = true;
-      this.onionInstancedMesh.visible = true;
-      this.onionBodies.forEach((body) => {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * (this.wokRadius * 0.4);
-        body.setTranslation({ x: Math.cos(a) * r, y: 0.6, z: Math.sin(a) * r }, true);
-        body.setEnabled(true);
-        body.setLinvel({ x: (Math.random() - 0.5) * 0.5, y: 1.0, z: (Math.random() - 0.5) * 0.5 }, true);
-      });
-
-      if (this.timeRemaining <= 12.0 && this.timeRemaining >= 4.0) {
+      this.spawnOnion();
+      if (this.timeRemaining <= 15.0 && this.timeRemaining >= 3.0) {
         this.showFeedback('シャキシャキネギ！(PERFECT)', '#00e676');
         this.addScore(600);
       } else {
@@ -937,6 +1127,7 @@ class GokuChahan3D {
     };
 
     applyTossToBodies(this.riceBodies);
+    if (this.eggSpawned) applyTossToBodies(this.eggBodies);
     if (this.meatSpawned) applyTossToBodies(this.meatBodies);
     if (this.onionSpawned) applyTossToBodies(this.onionBodies);
 
@@ -1087,22 +1278,38 @@ class GokuChahan3D {
           }
         }
 
-        // 動的な色の変化（生米 ➔ 卵 ➔ 黄金パラパラ ➔ 焦げ）
+        // 動的な色の変化（実写テクスチャのツヤをそのまま美しく発色！黒く潰さない）
         const burnTime = this.riceBurnTimers[i];
-        if (isBurnt || burnTime > 8.0) {
-          tempColor.setHex(0x3d1308); // 焦げ黒褐色
+        if (isBurnt && burnTime > 20.0) {
+          tempColor.setHex(0x8a4518); // 香ばしいキツネ色（黒焦げにはしない）
         } else if (this.dryness > 55) {
-          tempColor.setHex(0xffb703); // 黄金パラパラ
+          tempColor.setHex(0xfffae6); // 黄金パラパラ光沢
         } else if (isEggCoated) {
-          tempColor.setHex(0xffe066); // 卵イエロー
+          tempColor.setHex(0xfff4b8); // 卵イエローコーティング
         } else {
-          tempColor.setHex(0xf5f5ea); // 白米
+          tempColor.setHex(0xffffff); // 実写テクスチャそのままのツヤツヤ純白米！
         }
 
         this.riceInstancedMesh.setColorAt(i, tempColor);
       }
       this.riceInstancedMesh.instanceMatrix.needsUpdate = true;
       if (this.riceInstancedMesh.instanceColor) this.riceInstancedMesh.instanceColor.needsUpdate = true;
+    }
+
+    // 卵の同期 (ふんわり半熟そぼろ)
+    if (this.eggSpawned) {
+      for (let i = 0; i < this.eggCount; i++) {
+        const body = this.eggBodies[i];
+        if (!body.isEnabled()) continue;
+        const pos = body.translation();
+        this.clampToWok(body, pos);
+        const rot = body.rotation();
+        dummy.position.set(pos.x, pos.y, pos.z);
+        dummy.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+        dummy.updateMatrix();
+        this.eggInstancedMesh.setMatrixAt(i, dummy.matrix);
+      }
+      this.eggInstancedMesh.instanceMatrix.needsUpdate = true;
     }
 
     // チャーシューの同期
